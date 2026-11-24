@@ -17,6 +17,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 6000);
   }
 
+  function formatFullLocationInput(rawValue) {
+    const clean = (rawValue || '').trim().replace(/\s+/g, ' ');
+    if (!clean) return '';
+    const words = clean.split(' ').map((w) => {
+      if (w.includes(',')) {
+        return w.split(',').map((p) => p ? p.charAt(0).toUpperCase() + p.slice(1) : '').join(',');
+      }
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    });
+    const formatted = words.join(' ');
+    const lower = formatted.toLowerCase();
+    if (!lower.includes('tanzania') && !lower.includes('zanzibar')) {
+      return `${formatted}, Zanzibar, Tanzania`;
+    }
+    return formatted;
+  }
+
   async function loadCargoWithCode(code) {
     unlockError.innerHTML = '';
     try {
@@ -53,8 +70,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('roleBadge').textContent = `Nafasi Yako: ${data.role}`;
 
     const initialText = cargo.initial_point
-      ? ` | Mwanzo (Initial): ${cargo.initial_point.time} (${Number(cargo.initial_point.lat).toFixed(4)}, ${Number(cargo.initial_point.lng).toFixed(4)})`
-      : ' | Mwanzo (Initial): Unasubiri Agent 1 atie tick';
+      ? ` | Mwanzo (Initial): ${cargo.initial_point.place} (${cargo.initial_point.time})`
+      : ' | Mwanzo (Initial): Agent 1 akianza kusafirisha atatia tick';
 
     document.getElementById('routeSubtitle').textContent =
       `Owner: ${cargo.owner_name} | Unapoelekea: ${cargo.destination} | Aliyesajili: ${cargo.registered_by}${initialText}`;
@@ -94,7 +111,6 @@ document.addEventListener('DOMContentLoaded', () => {
         lockWarning = `<div class="alert alert-warning">⏳ Huwezi kutia tick sasa. Subiri Agent aliyekutangulia akamilishe hatua zake zote.</div>`;
       }
 
-      const tArr = ag.ticks.arrived;
       const tRec = ag.ticks.received;
       const tDis = ag.ticks.dispatched;
 
@@ -111,10 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         ${lockWarning}
 
-        <div class="tick-grid">
-          ${renderTickBox('arrived', '1. Nimefika Eneo Husika', tArr, canTickThisAgent, true)}
-          ${renderTickBox('received', '2. Nimepokea Mzigo', tRec, canTickThisAgent, tArr.done)}
-          ${renderTickBox('dispatched', '3. Nimetoa / Kukabidhi Mzigo', tDis, canTickThisAgent, tRec.done)}
+        <div class="grid-2" style="margin-top: 14px;">
+          ${renderTickBox('received', '1. Nimepokea Mzigo', tRec, canTickThisAgent, true)}
+          ${renderTickBox('dispatched', '2. Nimetoa / Kukabidhi Mzigo', tDis, canTickThisAgent, tRec.done)}
         </div>
       `;
 
@@ -130,8 +145,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="tick-box done">
           <div>
             <strong style="color:#6ee7b7;">☑️ ${title}</strong>
-            <p style="font-size:0.82rem; color:#cbd5e1; margin-top:6px;">🕒 Muda: ${tickData.time}</p>
-            <p style="font-size:0.8rem; color:#94a3b8;">📍 GPS: ${Number(tickData.lat).toFixed(5)}, ${Number(tickData.lng).toFixed(5)}</p>
+            <p style="font-size:0.86rem; color:#f8fafc; margin-top:6px;">📍 Eneo: <strong>${tickData.place}</strong></p>
+            <p style="font-size:0.82rem; color:#cbd5e1; margin-top:4px;">🕒 Muda: ${tickData.time}</p>
           </div>
         </div>
       `;
@@ -142,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="tick-box">
         <div>
           <strong>⬜ ${title}</strong>
-          <p style="font-size:0.82rem; color:#94a3b8; margin-top:4px;">GPS itasoma location yako kiotomatiki.</p>
+          <p style="font-size:0.82rem; color:#94a3b8; margin-top:4px;">Andika eneo kamili (mf. Kinuni, Zanzibar, Tanzania).</p>
         </div>
         <button type="button" class="btn btn-primary btn-sm btn-do-tick" data-tick="${type}" ${disabled}>
           ✔️ Tia Tick Sasa
@@ -153,52 +168,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function bindTimelineEvents() {
     document.querySelectorAll('.btn-do-tick').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const tickType = btn.getAttribute('data-tick');
-        if (!navigator.geolocation) {
-          showAlert('Simu au Browser yako haisupport GPS Location!', 'danger');
+        const rawPlace = prompt('Andika eneo kamili (mf. Kinuni, Zanzibar, Tanzania):');
+        if (!rawPlace || !rawPlace.trim()) {
+          showAlert('Lazima uandike jina la eneo ili kutia tick.', 'danger');
           return;
         }
 
-        btn.disabled = true;
-        btn.textContent = '📡 Inasoma GPS...';
+        const fullPlace = formatFullLocationInput(rawPlace);
 
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            try {
-              const res = await fetch('/api/tick', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  cargo_name: cargoName,
-                  code: currentCode,
-                  tick_type: tickType,
-                  lat: pos.coords.latitude,
-                  lng: pos.coords.longitude
-                })
-              });
-              const data = await res.json();
-              if (!data.success) {
-                showAlert(data.message, 'danger');
-                btn.disabled = false;
-                btn.textContent = '✔️ Tia Tick Sasa';
-                return;
-              }
-              showAlert(`✅ ${data.message} (${data.time})`, 'success');
-              loadCargoWithCode(currentCode);
-            } catch (e) {
-              showAlert('Hitilafu ya kutuma tick.', 'danger');
-              btn.disabled = false;
-              btn.textContent = '✔️ Tia Tick Sasa';
-            }
-          },
-          () => {
-            showAlert('⚠️ Lazima uwashe GPS Location ya simu na uruhusu browser kuitumia!', 'danger');
+        btn.disabled = true;
+        btn.textContent = 'Inahifadhi...';
+
+        try {
+          const res = await fetch('/api/tick', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cargo_name: cargoName,
+              code: currentCode,
+              tick_type: tickType,
+              place: fullPlace
+            })
+          });
+          const data = await res.json();
+          if (!data.success) {
+            showAlert(data.message, 'danger');
             btn.disabled = false;
             btn.textContent = '✔️ Tia Tick Sasa';
-          },
-          { enableHighAccuracy: true, timeout: 15000 }
-        );
+            return;
+          }
+          showAlert(`✅ ${data.message} (${data.time})`, 'success');
+          loadCargoWithCode(currentCode);
+        } catch (e) {
+          showAlert('Hitilafu ya kutuma tick.', 'danger');
+          btn.disabled = false;
+          btn.textContent = '✔️ Tia Tick Sasa';
+        }
       });
     });
 
