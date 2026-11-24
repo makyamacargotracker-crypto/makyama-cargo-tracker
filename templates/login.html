@@ -63,7 +63,10 @@
             font-weight: 700;
             cursor: pointer;
         }
-        .auth-submit:hover { background: #46d8e7; }
+        .auth-submit:disabled {
+            opacity: .6;
+            cursor: wait;
+        }
         .auth-message {
             margin-top: 15px;
             font-size: 14px;
@@ -96,17 +99,30 @@
             </div>
 
             <form id="loginForm">
-                <label for="accessCode">Cargo Access Code</label>
+                <label for="cargoId">Cargo ID</label>
                 <input
                     type="text"
-                    id="accessCode"
-                    name="accessCode"
-                    placeholder="Enter your owner or agent code"
+                    id="cargoId"
+                    name="cargoId"
+                    placeholder="Enter your Cargo ID"
                     autocomplete="off"
                     required
                 >
 
-                <button class="auth-submit" type="submit">Continue Securely</button>
+                <label for="accessCode">Access Code</label>
+                <input
+                    type="password"
+                    id="accessCode"
+                    name="accessCode"
+                    placeholder="Enter your owner or agent code"
+                    autocomplete="current-password"
+                    required
+                >
+
+                <button class="auth-submit" id="loginButton" type="submit">
+                    Continue Securely
+                </button>
+
                 <p class="auth-message" id="loginMessage" role="alert"></p>
             </form>
 
