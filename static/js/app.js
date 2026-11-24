@@ -20,8 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const startText = data.initial_point
-          ? `Mwanzo: GPS (${Number(data.initial_point.lat).toFixed(4)}, ${Number(data.initial_point.lng).toFixed(4)})`
-          : `Mwanzo: Unasubiri Agent 1 atie tick`;
+          ? `Mwanzo: ${data.initial_point.place} (${data.initial_point.time})`
+          : `Mwanzo: Agent 1 akianza kusafirisha atatia tick`;
 
         const roleBadge = data.matched_role
           ? `<span class="badge-pill" style="margin:0 0 0 8px;">Imepatikana kwa Code: ${data.matched_role}</span>`
