@@ -1,0 +1,124 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | MAKYAMA CARGO TRACKER</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .auth-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 30px 16px;
+            background: #07111f;
+        }
+        .auth-card {
+            width: 100%;
+            max-width: 460px;
+            padding: 35px;
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 18px;
+            background: #101e30;
+            box-shadow: 0 20px 60px rgba(0,0,0,.3);
+        }
+        .auth-logo {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+        .auth-logo h1 {
+            color: #fff;
+            font-size: 25px;
+            margin-bottom: 8px;
+        }
+        .auth-logo span { color: #19c5d8; }
+        .auth-logo p { color: #9aabc0; font-size: 14px; }
+        .auth-card label {
+            display: block;
+            color: #dce7f4;
+            margin: 18px 0 8px;
+            font-size: 14px;
+        }
+        .auth-card input {
+            width: 100%;
+            padding: 14px;
+            border-radius: 9px;
+            border: 1px solid #34465d;
+            background: #091626;
+            color: white;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .auth-card input:focus { border-color: #19c5d8; }
+        .auth-submit {
+            width: 100%;
+            margin-top: 25px;
+            padding: 14px;
+            border: 0;
+            border-radius: 9px;
+            color: #06121f;
+            background: #19c5d8;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .auth-submit:hover { background: #46d8e7; }
+        .auth-message {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #ff9b9b;
+            text-align: center;
+        }
+        .auth-links {
+            text-align: center;
+            margin-top: 22px;
+            color: #9aabc0;
+            font-size: 14px;
+        }
+        .auth-links a { color: #19c5d8; text-decoration: none; }
+        .back-home {
+            display: block;
+            text-align: center;
+            margin-top: 20px;
+            color: #9aabc0;
+            text-decoration: none;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <main class="auth-page">
+        <section class="auth-card">
+            <div class="auth-logo">
+                <h1>MAKYAMA <span>CARGO</span></h1>
+                <p>Secure Cargo Tracking Platform</p>
+            </div>
+
+            <form id="loginForm">
+                <label for="accessCode">Cargo Access Code</label>
+                <input
+                    type="text"
+                    id="accessCode"
+                    name="accessCode"
+                    placeholder="Enter your owner or agent code"
+                    autocomplete="off"
+                    required
+                >
+
+                <button class="auth-submit" type="submit">Continue Securely</button>
+                <p class="auth-message" id="loginMessage" role="alert"></p>
+            </form>
+
+            <div class="auth-links">
+                Need to register a cargo?
+                <a href="{{ url_for('register') }}">Register here</a>
+            </div>
+
+            <a class="back-home" href="{{ url_for('index') }}">← Back to homepage</a>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+</body>
+</html>
