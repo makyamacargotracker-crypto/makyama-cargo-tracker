@@ -1,5 +1,4 @@
 document.addEventListener('DOMContentLoaded', async () => {
-  // 1. ADMIN LOGIN
   const loginForm = document.getElementById('adminLoginForm');
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
@@ -23,7 +22,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // 2. ADMIN DASHBOARD DATA
   const adminList = document.getElementById('adminCargosList');
   if (adminList) {
     const adminMap = new MakyamaGlobalMap('adminGlobalMap');
@@ -37,7 +35,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       allCargos = data.cargos || [];
       adminMap.renderCargoPoints(allCargos);
 
-      // Takwimu
       let totalAgents = 0;
       let completedCargos = 0;
       allCargos.forEach((c) => {
@@ -65,13 +62,16 @@ document.addEventListener('DOMContentLoaded', async () => {
           <tr>
             <td>#${a.step_order}</td>
             <td>${a.agent_name}</td>
-            <td>${a.location_point}</td>
             <td><span class="code-pill">${a.agent_code}</span></td>
             <td>${a.ticks.arrived.done ? '✅ ' + a.ticks.arrived.time : '⏳'}</td>
             <td>${a.ticks.received.done ? '✅ ' + a.ticks.received.time : '⏳'}</td>
             <td>${a.ticks.dispatched.done ? '✅ ' + a.ticks.dispatched.time : '⏳'}</td>
           </tr>
         `).join('');
+
+        const initInfo = c.initial_point
+          ? ` | Mwanzo: ${c.initial_point.time} (${Number(c.initial_point.lat).toFixed(4)}, ${Number(c.initial_point.lng).toFixed(4)})`
+          : ' | Mwanzo: Bado';
 
         return `
           <div class="agent-card" style="margin-bottom:20px;">
@@ -80,10 +80,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <h3>📦 ${c.cargo_name}</h3>
                 <p style="color:#94a3b8; font-size:0.88rem;">
                   Owner: <strong>${c.owner_name}</strong> | Code ya Owner: <span class="code-pill" style="color:#6ee7b7;">${c.owner_code}</span> |
-                  Njia: ${c.origin} ➔ ${c.destination} (${c.registered_by})
+                  Unapoelekea: <strong>${c.destination}</strong> (${c.registered_by})${initInfo}
                 </p>
               </div>
-              <a href="/cargo/${encodeURIComponent(c.cargo_name)}" class="btn btn-outline btn-sm">Fungua Mzigo ➔</a>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <a href="/cargo/${encodeURIComponent(c.cargo_name)}" class="btn btn-outline btn-sm">Fungua Mzigo ➔</a>
+                <button type="button" class="btn btn-danger btn-sm btn-delete-cargo" data-id="${c.id}" data-name="${c.cargo_name}">🗑️ Futa Mzigo</button>
+              </div>
             </div>
             <div class="table-wrap">
               <table>
@@ -91,7 +94,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                   <tr>
                     <th>Hatua</th>
                     <th>Agent</th>
-                    <th>Kituo</th>
                     <th>Code</th>
                     <th>Amefika</th>
                     <th>Amepokea</th>
@@ -104,11 +106,35 @@ document.addEventListener('DOMContentLoaded', async () => {
           </div>
         `;
       }).join('');
+
+      document.querySelectorAll('.btn-delete-cargo').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const cargoId = btn.getAttribute('data-id');
+          const cName = btn.getAttribute('data-name');
+          if (!confirm(`Una uhakika unataka kufuta kabisa mzigo "${cName}"?`)) return;
+
+          const res = await fetch(`/api/admin/delete-cargo/${encodeURIComponent(cargoId)}`, {
+            method: 'DELETE'
+          });
+          const data = await res.json();
+          if (data.success) {
+            fetchAdminCargos();
+          } else {
+            alert(data.message || 'Imeshindwa kufuta mzigo.');
+          }
+        });
+      });
     }
 
     document.getElementById('adminFilterInput')?.addEventListener('input', (e) => {
       const q = e.target.value.trim().toUpperCase();
-      const filtered = allCargos.filter((c) => c.cargo_name.includes(q) || c.owner_name.toUpperCase().includes(q));
+      const filtered = allCargos.filter((c) => {
+        const matchCargo = (c.cargo_name || '').toUpperCase().includes(q);
+        const matchOwner = (c.owner_name || '').toUpperCase().includes(q);
+        const matchOwnerCode = (c.owner_code || '').toUpperCase().includes(q);
+        const matchAgentCode = (c.agents || []).some((a) => (a.agent_code || '').toUpperCase().includes(q));
+        return matchCargo || matchOwner || matchOwnerCode || matchAgentCode;
+      });
       renderAdminList(filtered);
     });
 
