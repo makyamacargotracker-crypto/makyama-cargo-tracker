@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register Cargo | MAKYAMA CARGO TRACKER</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .register-page {
+            min-height: 100vh;
+            padding: 35px 15px;
+            background: #07111f;
+        }
+        .register-card {
+            max-width: 760px;
+            margin: auto;
+            padding: 30px;
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,.1);
+            background: #101e30;
+        }
+        .register-heading { text-align: center; margin-bottom: 30px; }
+        .register-heading h1 { color: white; font-size: 26px; }
+        .register-heading p { color: #9aabc0; }
+        .register-card label {
+            display: block;
+            color: #dce7f4;
+            margin: 17px 0 8px;
+            font-size: 14px;
+        }
+        .register-card input,
+        .register-card select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 13px;
+            border-radius: 8px;
+            border: 1px solid #34465d;
+            background: #091626;
+            color: white;
+        }
+        .register-card input:focus,
+        .register-card select:focus { outline: none; border-color: #19c5d8; }
+        .form-section {
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px solid #2b3b50;
+        }
+        .form-section h3 { color: #19c5d8; }
+        .agent-row {
+            padding: 15px;
+            margin: 14px 0;
+            border: 1px solid #34465d;
+            border-radius: 10px;
+            background: #0b1929;
+        }
+        .agent-row h4 { color: white; margin: 0 0 10px; }
+        .secondary-button {
+            padding: 11px 15px;
+            border: 1px solid #19c5d8;
+            border-radius: 8px;
+            background: transparent;
+            color: #19c5d8;
+            cursor: pointer;
+        }
+        .remove-agent {
+            margin-top: 12px;
+            color: #ff9292;
+            background: transparent;
+            border: 0;
+            cursor: pointer;
+        }
+        .register-submit {
+            width: 100%;
+            padding: 15px;
+            margin-top: 25px;
+            border: 0;
+            border-radius: 9px;
+            background: #19c5d8;
+            color: #06121f;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .register-message { color: #ff9b9b; margin-top: 15px; text-align: center; }
+        .register-note {
+            color: #a9bacd;
+            background: #0b1929;
+            border-left: 3px solid #19c5d8;
+            padding: 12px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .back-home {
+            display: block;
+            text-align: center;
+            color: #9aabc0;
+            text-decoration: none;
+            margin-top: 22px;
+        }
+    </style>
+</head>
+<body>
+<main class="register-page">
+    <section class="register-card">
+        <header class="register-heading">
+            <h1>Register New Cargo</h1>
+            <p>Create a secure cargo journey record</p>
+        </header>
+
+        <form id="registerForm">
+            <label for="cargoName">Registered Cargo Name</label>
+            <input id="cargoName" name="cargoName" type="text"
+                   placeholder="Example: MAKYAMA ELECTRONICS 001" required>
+
+            <label for="ownerName">Cargo Owner's Full Name</label>
+            <input id="ownerName" name="ownerName" type="text"
+                   placeholder="Enter cargo owner's name" required>
+
+            <label for="destination">Final Destination</label>
+            <input id="destination" name="destination" type="text"
+                   placeholder="Example: Zanzibar, Tanzania" required>
+
+            <div class="form-section">
+                <h3>Who is registering this cargo?</h3>
+
+                <label for="registrarRole">Registration authority</label>
+                <select id="registrarRole" name="registrarRole" required>
+                    <option value="owner">Cargo Owner</option>
+                    <option value="agent1">Agent 1</option>
+                </select>
+
+                <label for="registrarName">Registrar's Name</label>
+                <input id="registrarName" name="registrarName" type="text"
+                       placeholder="Enter registrar's name" required>
+            </div>
+
+            <div class="form-section">
+                <h3>Transportation Agents</h3>
+                <p class="register-note">
+                    Add agents in the order they will transport the cargo.
+                    The next agent will only receive the cargo after the
+                    previous agent completes the handover.
+                </p>
+
+                <div id="agentsContainer">
+                    <div class="agent-row">
+                        <h4>Agent 1</h4>
+                        <label>Agent's Full Name</label>
+                        <input type="text" class="agent-name"
+                               placeholder="Enter agent's name" required>
+                    </div>
+                </div>
+
+                <button type="button" class="secondary-button" id="addAgentButton">
+                    + Add Another Agent
+                </button>
+            </div>
+
+            <button type="submit" class="register-submit">
+                Register Cargo
+            </button>
+
+            <p class="register-message" id="registerMessage" role="alert"></p>
+        </form>
+
+        <a class="back-home" href="{{ url_for('index') }}">← Back to homepage</a>
+    </section>
+</main>
+
+<script>
+    const agentsContainer = document.getElementById("agentsContainer");
+    const addAgentButton = document.getElementById("addAgentButton");
+
+    addAgentButton.addEventListener("click", function () {
+        const count = agentsContainer.querySelectorAll(".agent-row").length + 1;
+
+        const row = document.createElement("div");
+        row.className = "agent-row";
+
+        const heading = document.createElement("h4");
+        heading.textContent = "Agent " + count;
+
+        const label = document.createElement("label");
+        label.textContent = "Agent's Full Name";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "agent-name";
+        input.placeholder = "Enter agent's name";
+        input.required = true;
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "remove-agent";
+        remove.textContent = "Remove agent";
+        remove.addEventListener("click", function () {
+            row.remove();
+            updateAgentNumbers();
+        });
+
+        row.append(heading, label, input, remove);
+        agentsContainer.appendChild(row);
+        updateAgentNumbers();
+    });
+
+    function updateAgentNumbers() {
+        const rows = agentsContainer.querySelectorAll(".agent-row");
+        rows.forEach((row, index) => {
+            row.querySelector("h4").textContent = "Agent " + (index + 1);
+        });
+    }
+</script>
+
+<script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+</body>
+</html>
