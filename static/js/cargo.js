@@ -1,402 +1,339 @@
+document.addEventListener('DOMContentLoaded', () => {
+  const cargoName = window.CARGO_NAME;
+  let currentCode = sessionStorage.getItem(`code_${cargoName}`) || '';
+  let currentState = null;
 
-"use strict";
+  const globalMap = new MakyamaGlobalMap('globalMap');
 
-// =============================================
-// MAKYAMA CARGO TRACKER
-// CARGO OPERATIONS AND GPS
-// =============================================
+  const unlockSection = document.getElementById('unlockSection');
+  const trackingWorkspace = document.getElementById('trackingWorkspace');
+  const unlockForm = document.getElementById('unlockForm');
+  const unlockError = document.getElementById('unlockError');
+  const actionAlert = document.getElementById('actionAlert');
 
-document.addEventListener("DOMContentLoaded", () => {
+  function showAlert(msg, type = 'success') {
+    actionAlert.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+    setTimeout(() => { actionAlert.innerHTML = ''; }, 6000);
+  }
 
-    const $ = id => document.getElementById(id);
+  async function loadCargoWithCode(code) {
+    unlockError.innerHTML = '';
+    try {
+      const res = await fetch('/api/access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cargo_name: cargoName, code })
+      });
+      const data = await res.json();
 
-    const elements = {
-        welcome: $("userWelcome"),
-        name: $("cargoName"),
-        destination: $("cargoDestination"),
-        status: $("cargoStatus"),
-        description: $("actionDescription"),
-        message: $("actionMessage"),
-        start: $("startButton"),
-        handover: $("handoverButton"),
-        receive: $("receiveButton"),
-        ownerReceive: $("ownerReceiveButton"),
-        history: $("eventList"),
-        agents: $("agentManagement"),
-        addAgent: $("addAgentButton"),
-        agentName: $("newAgentName"),
-        agentMessage: $("agentMessage"),
-        codeSection: $("issuedCodeSection"),
-        issuedCode: $("issuedCode"),
-        logout: $("logoutButton")
-    };
+      if (!data.success) {
+        sessionStorage.removeItem(`code_${cargoName}`);
+        unlockSection.style.display = 'block';
+        trackingWorkspace.style.display = 'none';
+        unlockError.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+        return;
+      }
 
-    let cargo = null;
-    let user = null;
-    let map = null;
-    let locationMarker = null;
+      currentCode = code.toUpperCase();
+      sessionStorage.setItem(`code_${cargoName}`, currentCode);
+      currentState = data;
 
-    // -----------------------------------------
-    // INITIALIZE MAP
-    // -----------------------------------------
+      unlockSection.style.display = 'none';
+      trackingWorkspace.style.display = 'block';
 
-    function initializeMap() {
-        const mapElement = $("dashboardMap");
+      renderWorkspace(data);
+    } catch (err) {
+      unlockError.innerHTML = `<div class="alert alert-danger">Tatizo la mtandao. Jaribu tena.</div>`;
+    }
+  }
 
-        if (!mapElement || typeof L === "undefined") return;
+  function renderWorkspace(data) {
+    const cargo = data.cargo;
+    document.getElementById('cargoTitle').textContent = cargo.cargo_name;
+    document.getElementById('roleBadge').textContent = `Nafasi Yako: ${data.role}`;
+    document.getElementById('routeSubtitle').textContent =
+      `Owner: ${cargo.owner_name} | Njia: ${cargo.origin} ➔ ${cargo.destination} | Aliyesajili: ${cargo.registered_by}`;
 
-        map = L.map(mapElement).setView([0, 0], 2);
+    // Onyesha panel ya Owner kama ana ruhusa ya kusimamia ma-agent
+    document.getElementById('ownerManagePanel').style.display = data.can_manage_agents ? 'block' : 'none';
 
-        L.tileLayer(
-            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            {
-                maxZoom: 19,
-                attribution: "&copy; OpenStreetMap"
-            }
-        ).addTo(map);
+    // Sasisha Global Map
+    globalMap.renderCargoPoints([cargo]);
 
-        setTimeout(() => map.invalidateSize(), 300);
+    // Jenga Timeline ya Ma-Agent
+    const timeline = document.getElementById('agentsTimeline');
+    timeline.innerHTML = '';
+
+    (cargo.agents || []).forEach((ag) => {
+      const isMyAgentRow = (data.current_agent_id === ag.id);
+      const canTickThisAgent = isMyAgentRow && (data.prev_agent_completed !== false);
+
+      const card = document.createElement('div');
+      card.className = `agent-card ${ag.is_completed ? 'completed' : ''} ${(!canTickThisAgent && data.role !== 'OWNER') ? 'locked' : ''}`;
+
+      let adminControlsHtml = '';
+      if (data.can_reset_codes || data.can_manage_agents) {
+        adminControlsHtml += `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">`;
+        if (ag.agent_code) {
+          adminControlsHtml += `<span class="code-pill">Code: ${ag.agent_code}</span>`;
+        }
+        if (data.can_reset_codes) {
+          adminControlsHtml += `<button type="button" class="btn btn-warning btn-sm btn-reset-code" data-id="${ag.id}">🔄 Code Mpya</button>`;
+        }
+        if (data.can_manage_agents) {
+          adminControlsHtml += `<button type="button" class="btn btn-outline btn-sm btn-edit-agent" data-id="${ag.id}" data-name="${ag.agent_name}" data-loc="${ag.location_point}">✏️ Badili</button>`;
+          adminControlsHtml += `<button type="button" class="btn btn-danger btn-sm btn-del-agent" data-id="${ag.id}">🗑️ Futa</button>`;
+        }
+        adminControlsHtml += `</div>`;
+      }
+
+      let lockWarning = '';
+      if (isMyAgentRow && data.prev_agent_completed === false) {
+        lockWarning = `<div class="alert alert-warning">⏳ Huwezi kutia tick sasa. Subiri Agent aliyekutangulia akamilishe hatua zake zote.</div>`;
+      }
+
+      const tArr = ag.ticks.arrived;
+      const tRec = ag.ticks.received;
+      const tDis = ag.ticks.dispatched;
+
+      card.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+          <div>
+            <h3>Hatua #${ag.step_order}: ${ag.agent_name}</h3>
+            <p style="color:#94a3b8; font-size:0.9rem;">📍 Kituo: <strong>${ag.location_point}</strong></p>
+            ${adminControlsHtml}
+          </div>
+          <span class="badge-pill" style="margin:0; ${ag.is_completed ? 'border-color:#10b981; color:#6ee7b7;' : ''}">
+            ${ag.is_completed ? '✅ Amekamilisha' : '⏳ Anaendelea'}
+          </span>
+        </div>
+
+        ${lockWarning}
+
+        <div class="tick-grid">
+          ${renderTickBox('arrived', '1. Nimefika Eneo Husika', tArr, canTickThisAgent, true)}
+          ${renderTickBox('received', '2. Nimepokea Mzigo', tRec, canTickThisAgent, tArr.done)}
+          ${renderTickBox('dispatched', '3. Nimetoa / Kukabidhi Mzigo', tDis, canTickThisAgent, tRec.done)}
+        </div>
+      `;
+
+      timeline.appendChild(card);
+    });
+
+    bindTimelineEvents();
+  }
+
+  function renderTickBox(type, title, tickData, canTick, prevStepDone) {
+    if (tickData && tickData.done) {
+      return `
+        <div class="tick-box done">
+          <div>
+            <strong style="color:#6ee7b7;">☑️ ${title}</strong>
+            <p style="font-size:0.82rem; color:#cbd5e1; margin-top:6px;">🕒 Muda: ${tickData.time}</p>
+            <p style="font-size:0.8rem; color:#94a3b8;">📍 GPS: ${Number(tickData.lat).toFixed(5)}, ${Number(tickData.lng).toFixed(5)}</p>
+          </div>
+        </div>
+      `;
     }
 
-    // -----------------------------------------
-    // SERVER REQUEST
-    // -----------------------------------------
+    const disabled = (!canTick || !prevStepDone) ? 'disabled' : '';
+    return `
+      <div class="tick-box">
+        <div>
+          <strong>⬜ ${title}</strong>
+          <p style="font-size:0.82rem; color:#94a3b8; margin-top:4px;">Bonyeza kuthibitisha location na muda.</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm btn-do-tick" data-tick="${type}" ${disabled}>
+          ✔️ Tia Tick Sasa
+        </button>
+      </div>
+    `;
+  }
 
-    async function api(url, options = {}) {
-        const response = await fetch(url, {
-            credentials: "same-origin",
-            ...options,
-            headers: {
-                "Content-Type": "application/json",
-                ...options.headers
-            }
-        });
-
-        const result = await response.json().catch(() => ({}));
-
-        if (!response.ok || result.success === false) {
-            throw new Error(result.message || "Request failed.");
+  function bindTimelineEvents() {
+    // 1. Vitufe vya kutia tick (GPS + Time)
+    document.querySelectorAll('.btn-do-tick').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tickType = btn.getAttribute('data-tick');
+        if (!navigator.geolocation) {
+          showAlert('Simu au Browser yako haisupport GPS Location!', 'danger');
+          return;
         }
 
-        return result;
-    }
+        btn.disabled = true;
+        btn.textContent = '📡 Inachukua GPS...';
 
-    // -----------------------------------------
-    // LOAD USER AND CARGO
-    // -----------------------------------------
-
-    async function loadDashboard() {
-        try {
-            const result = await api("/api/cargo/me");
-
-            cargo = result.cargo;
-            user = result.user;
-
-            if (!cargo || !user) {
-                throw new Error("Cargo or user information is unavailable.");
-            }
-
-            renderDashboard();
-            await loadHistory();
-
-        } catch (error) {
-            if (elements.message) {
-                elements.message.textContent = error.message;
-            }
-        }
-    }
-
-    // -----------------------------------------
-    // DISPLAY CARGO INFORMATION
-    // -----------------------------------------
-
-    function renderDashboard() {
-        elements.welcome.textContent =
-            `Welcome, ${user.name} | Role: ${user.role}`;
-
-        elements.name.textContent = cargo.cargo_name;
-        elements.destination.textContent = cargo.destination;
-        elements.status.textContent = formatStatus(cargo.status);
-
-        const permissions = cargo.permissions || {};
-
-        elements.start.disabled = !permissions.can_start;
-        elements.handover.disabled = !permissions.can_handover;
-        elements.receive.disabled = !permissions.can_receive;
-        elements.ownerReceive.disabled = !permissions.can_confirm_delivery;
-
-        elements.start.style.display =
-            permissions.can_start ? "inline-block" : "none";
-
-        elements.handover.style.display =
-            permissions.can_handover ? "inline-block" : "none";
-
-        elements.receive.style.display =
-            permissions.can_receive ? "inline-block" : "none";
-
-        elements.ownerReceive.style.display =
-            permissions.can_confirm_delivery ? "inline-block" : "none";
-
-        elements.description.textContent =
-            permissions.action_description ||
-            "Your available transportation actions are shown above.";
-
-        elements.agents.style.display =
-            permissions.can_manage_agents ? "block" : "none";
-
-        displayLocations(cargo.visible_locations || []);
-    }
-
-    function formatStatus(status) {
-        const statuses = {
-            registered: "Registered",
-            in_transit: "In Transit",
-            delivered: "Delivered",
-            completed: "Completed"
-        };
-
-        return statuses[status] || status || "Unknown";
-    }
-
-    // -----------------------------------------
-    // GPS LOCATION
-    // -----------------------------------------
-
-    function getGPSLocation() {
-        return new Promise((resolve, reject) => {
-
-            if (!navigator.geolocation) {
-                reject(new Error("GPS is not supported by this device."));
-                return;
-            }
-
-            navigator.geolocation.getCurrentPosition(
-                position => {
-                    resolve({
-                        latitude: position.coords.latitude,
-                        longitude: position.coords.longitude,
-                        accuracy: position.coords.accuracy
-                    });
-                },
-                error => {
-                    reject(new Error(
-                        error.code === 1
-                            ? "Please allow location access."
-                            : "Unable to obtain GPS location."
-                    ));
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 20000,
-                    maximumAge: 0
-                }
-            );
-        });
-    }
-
-    // -----------------------------------------
-    // PERFORM TRANSPORT ACTION
-    // -----------------------------------------
-
-    async function performAction(action) {
-
-        const buttons = [
-            elements.start,
-            elements.handover,
-            elements.receive,
-            elements.ownerReceive
-        ];
-
-        try {
-            elements.message.textContent = "Obtaining GPS location...";
-
-            buttons.forEach(button => button.disabled = true);
-
-            const location = await getGPSLocation();
-
-            elements.message.textContent =
-                "Submitting verified location and action...";
-
-            const result = await api("/api/cargo/action", {
-                method: "POST",
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const res = await fetch('/api/tick', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    action: action,
-                    latitude: location.latitude,
-                    longitude: location.longitude,
-                    accuracy: location.accuracy
+                  cargo_name: cargoName,
+                  code: currentCode,
+                  tick_type: tickType,
+                  lat: pos.coords.latitude,
+                  lng: pos.coords.longitude
                 })
-            });
-
-            elements.message.textContent =
-                result.message || "Action recorded successfully.";
-
-            await loadDashboard();
-
-        } catch (error) {
-            elements.message.textContent = error.message;
-            await loadDashboard();
-        }
-    }
-
-    elements.start.addEventListener("click", () => {
-        performAction("start");
-    });
-
-    elements.handover.addEventListener("click", () => {
-        performAction("handover");
-    });
-
-    elements.receive.addEventListener("click", () => {
-        performAction("receive");
-    });
-
-    elements.ownerReceive.addEventListener("click", () => {
-        const confirmed = confirm(
-            "Are you sure you have received your cargo?"
-        );
-
-        if (confirmed) {
-            performAction("owner_confirm");
-        }
-    });
-
-    // -----------------------------------------
-    // JOURNEY HISTORY
-    // -----------------------------------------
-
-    async function loadHistory() {
-        const result = await api("/api/cargo/history");
-
-        elements.history.replaceChildren();
-
-        if (!result.events || result.events.length === 0) {
-            elements.history.textContent = "No journey events recorded.";
-            return;
-        }
-
-        result.events.forEach(event => {
-
-            const item = document.createElement("article");
-            item.className = "event-item";
-
-            const title = document.createElement("strong");
-            title.textContent = event.description || event.action;
-
-            const details = document.createElement("small");
-
-            const date = event.timestamp
-                ? new Date(event.timestamp).toLocaleString()
-                : "Date unavailable";
-
-            details.textContent =
-                `${event.agent_name || "System"} | ${date}`;
-
-            item.append(title, details);
-            elements.history.appendChild(item);
-
-            if (
-                map &&
-                Number.isFinite(Number(event.latitude)) &&
-                Number.isFinite(Number(event.longitude))
-            ) {
-                const marker = L.marker([
-                    Number(event.latitude),
-                    Number(event.longitude)
-                ]).addTo(map);
-
-                marker.bindPopup(
-                    `${event.description || event.action} - ${date}`
-                );
+              });
+              const data = await res.json();
+              if (!data.success) {
+                showAlert(data.message, 'danger');
+                btn.disabled = false;
+                btn.textContent = '✔️ Tia Tick Sasa';
+                return;
+              }
+              showAlert(`✅ ${data.message} (${data.time})`, 'success');
+              loadCargoWithCode(currentCode);
+            } catch (e) {
+              showAlert('Hitilafu ya kutuma tick.', 'danger');
             }
-        });
-    }
-
-    // -----------------------------------------
-    // DISPLAY PERMITTED LOCATIONS
-    // -----------------------------------------
-
-    function displayLocations(locations) {
-        if (!map) return;
-
-        if (locationMarker) {
-            map.removeLayer(locationMarker);
-            locationMarker = null;
-        }
-
-        locations.forEach(location => {
-            const lat = Number(location.latitude);
-            const lng = Number(location.longitude);
-
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-
-            const marker = L.circleMarker([lat, lng], {
-                radius: 8,
-                color: "#36d5e9",
-                fillOpacity: 0.9
-            }).addTo(map);
-
-            marker.bindPopup(
-                location.label || "Recorded cargo location"
-            );
-
-            locationMarker = marker;
-        });
-
-        if (locationMarker) {
-            map.setView(locationMarker.getLatLng(), 8);
-        }
-    }
-
-    // -----------------------------------------
-    // ADD NEW AGENT
-    // -----------------------------------------
-
-    elements.addAgent.addEventListener("click", async () => {
-
-        const name = elements.agentName.value.trim();
-
-        if (!name) {
-            elements.agentMessage.textContent =
-                "Enter the agent's name.";
-            return;
-        }
-
-        try {
-            const result = await api("/api/cargo/agents", {
-                method: "POST",
-                body: JSON.stringify({ name })
-            });
-
-            elements.agentMessage.textContent =
-                "Agent added successfully. Access code: " + result.code;
-
-            elements.agentName.value = "";
-
-            elements.codeSection.style.display = "block";
-            elements.issuedCode.textContent =
-                "New agent code: " + result.code;
-
-            await loadDashboard();
-
-        } catch (error) {
-            elements.agentMessage.textContent = error.message;
-        }
+          },
+          () => {
+            showAlert('⚠️ Lazima uwashe GPS Location ya simu na uruhusu browser kuitumia!', 'danger');
+            btn.disabled = false;
+            btn.textContent = '✔️ Tia Tick Sasa';
+          },
+          { enableHighAccuracy: true, timeout: 15000 }
+        );
+      });
     });
 
-    // -----------------------------------------
-    // LOGOUT
-    // -----------------------------------------
+    // 2. Kuomba code mpya ya agent
+    document.querySelectorAll('.btn-reset-code').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const agentId = btn.getAttribute('data-id');
+        if (!confirm('Una uhakika unataka kubadilisha code ya agent huyu? Code ya zamani haitafanya kazi tena.')) return;
 
-    elements.logout.addEventListener("click", async () => {
-        try {
-            await api("/api/logout", { method: "POST" });
-        } finally {
-            window.location.href = "/login";
+        const res = await fetch('/api/reset-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cargo_name: cargoName,
+            requester_code: currentCode,
+            agent_id: agentId
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert(`🔑 Code mpya imetolewa: ${data.new_code}`, 'success');
+          loadCargoWithCode(currentCode);
+        } else {
+          showAlert(data.message, 'danger');
         }
+      });
     });
 
-    // START
-    initializeMap();
-    loadDashboard();
+    // 3. Owner kubadili taarifa za agent
+    document.querySelectorAll('.btn-edit-agent').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const agentId = btn.getAttribute('data-id');
+        const oldName = btn.getAttribute('data-name');
+        const oldLoc = btn.getAttribute('data-loc');
+        const newName = prompt('Ingiza jina jipya la Agent:', oldName);
+        if (!newName) return;
+        const newLoc = prompt('Ingiza kituo kipya cha Agent:', oldLoc);
+        if (!newLoc) return;
 
+        const res = await fetch('/api/manage-agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cargo_name: cargoName,
+            owner_code: currentCode,
+            action: 'EDIT',
+            agent_id: agentId,
+            agent_name: newName,
+            location_point: newLoc
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert('✅ Taarifa za Agent zimebadilishwa.', 'success');
+          loadCargoWithCode(currentCode);
+        } else {
+          showAlert(data.message, 'danger');
+        }
+      });
+    });
+
+    // 4. Owner kufuta agent
+    document.querySelectorAll('.btn-del-agent').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const agentId = btn.getAttribute('data-id');
+        if (!confirm('Una uhakika unataka kumfuta Agent huyu kwenye mzigo huu?')) return;
+
+        const res = await fetch('/api/manage-agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cargo_name: cargoName,
+            owner_code: currentCode,
+            action: 'DELETE',
+            agent_id: agentId
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert('🗑️ Agent amefutwa.', 'success');
+          loadCargoWithCode(currentCode);
+        } else {
+          showAlert(data.message, 'danger');
+        }
+      });
+    });
+  }
+
+  // Owner kuongeza agent mpya
+  const addNewAgentForm = document.getElementById('addNewAgentForm');
+  if (addNewAgentForm) {
+    addNewAgentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const agentName = document.getElementById('newAgentName').value.trim();
+      const locationPoint = document.getElementById('newAgentLocation').value.trim();
+
+      const res = await fetch('/api/manage-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cargo_name: cargoName,
+          owner_code: currentCode,
+          action: 'ADD',
+          agent_name: agentName,
+          location_point: locationPoint
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        addNewAgentForm.reset();
+        showAlert(`✅ Agent mpya ameongezwa! Code yake ni: ${data.new_code}`, 'success');
+        loadCargoWithCode(currentCode);
+      } else {
+        showAlert(data.message, 'danger');
+      }
+    });
+  }
+
+  // Unlock Form Submit
+  if (unlockForm) {
+    unlockForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const code = document.getElementById('accessCodeInput').value.trim();
+      loadCargoWithCode(code);
+    });
+  }
+
+  document.getElementById('refreshCargoBtn')?.addEventListener('click', () => {
+    if (currentCode) loadCargoWithCode(currentCode);
+  });
+
+  document.getElementById('lockAgainBtn')?.addEventListener('click', () => {
+    sessionStorage.removeItem(`code_${cargoName}`);
+    location.reload();
+  });
+
+  if (currentCode) {
+    loadCargoWithCode(currentCode);
+  }
 });
