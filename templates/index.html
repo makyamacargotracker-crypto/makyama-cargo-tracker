@@ -1,0 +1,371 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#071426">
+
+    <title>MAKYAMA CARGO TRACKER</title>
+
+    <meta name="description"
+          content="Makyama Cargo Tracker - Global cargo tracking and logistics management.">
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/style.css') }}">
+
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+          rel="stylesheet">
+</head>
+
+<body>
+
+<header class="navbar">
+    <a href="/" class="brand">
+        <div class="brand-logo">M</div>
+        <div class="brand-name">
+            <strong>MAKYAMA</strong>
+            <span>CARGO TRACKER</span>
+        </div>
+    </a>
+
+    <button class="menu-toggle" id="menuToggle" aria-label="Open menu">
+        ☰
+    </button>
+
+    <nav class="nav-links" id="navLinks">
+        <a href="#home">Home</a>
+        <a href="#tracking">Track Cargo</a>
+        <a href="#global-map">Global Map</a>
+        <a href="#about">About</a>
+        <a href="/login" class="mobile-login">Cargo Access</a>
+    </nav>
+
+    <a href="/login" class="nav-button">
+        Cargo Access <span>→</span>
+    </a>
+</header>
+
+<main>
+
+    <!-- HERO SECTION -->
+
+    <section class="hero" id="home">
+
+        <div class="hero-content">
+
+            <div class="eyebrow">
+                <span class="live-dot"></span>
+                GLOBAL LOGISTICS TRACKING PLATFORM
+            </div>
+
+            <h1>
+                Move Cargo.<br>
+                <span>Track Every</span><br>
+                Journey.
+            </h1>
+
+            <p>
+                A smarter way to manage cargo transportation.
+                Monitor shipment handovers, record GPS locations
+                and follow your cargo journey from origin to destination.
+            </p>
+
+            <div class="hero-actions">
+                <a href="#tracking" class="primary-button">
+                    Track Your Cargo <span>→</span>
+                </a>
+
+                <a href="/login" class="secondary-button">
+                    Agent / Owner Access
+                </a>
+            </div>
+
+            <div class="hero-stats">
+                <div>
+                    <strong>GLOBAL</strong>
+                    <small>Reach</small>
+                </div>
+
+                <div>
+                    <strong>GPS</strong>
+                    <small>Location records</small>
+                </div>
+
+                <div>
+                    <strong>SECURE</strong>
+                    <small>Access system</small>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="hero-visual">
+
+            <div class="glow glow-one"></div>
+            <div class="glow glow-two"></div>
+
+            <div class="visual-card">
+
+                <div class="visual-card-header">
+                    <div>
+                        <small>MAKYAMA NETWORK</small>
+                        <h3>Global Shipment View</h3>
+                    </div>
+
+                    <span class="network-status">
+                        <span class="live-dot"></span>
+                        SYSTEM
+                    </span>
+                </div>
+
+                <div class="globe">
+                    <div class="globe-ring ring-one"></div>
+                    <div class="globe-ring ring-two"></div>
+                    <div class="globe-ring ring-three"></div>
+
+                    <div class="globe-dot dot-one"></div>
+                    <div class="globe-dot dot-two"></div>
+                    <div class="globe-dot dot-three"></div>
+                    <div class="globe-dot dot-four"></div>
+                </div>
+
+                <div class="visual-card-footer">
+                    <div>
+                        <small>LOGISTICS MANAGEMENT</small>
+                        <strong>Connected Worldwide</strong>
+                    </div>
+
+                    <div class="arrow-icon">↗</div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- TRACKING SECTION -->
+
+    <section class="tracking-section" id="tracking">
+
+        <div class="section-heading">
+            <span class="section-label">CARGO TRACKING</span>
+
+            <h2>Track your shipment</h2>
+
+            <p>
+                Search using the registered cargo name.
+            </p>
+        </div>
+
+        <form id="trackingForm" class="tracking-form">
+
+            <div class="search-icon">⌕</div>
+
+            <input
+                type="text"
+                id="cargoSearch"
+                placeholder="Enter cargo registered name..."
+                minlength="2"
+                required
+            >
+
+            <button type="submit">
+                Track Cargo →
+            </button>
+
+        </form>
+
+        <div id="searchMessage"
+             class="search-message"
+             aria-live="polite"></div>
+
+        <div id="searchResults" class="search-results"></div>
+
+    </section>
+
+
+    <!-- GLOBAL MAP -->
+
+    <section class="map-section" id="global-map">
+
+        <div class="map-heading">
+
+            <div>
+                <span class="section-label">WORLDWIDE VISIBILITY</span>
+
+                <h2>Global Tracking Map</h2>
+
+                <p>
+                    Explore the map and view verified cargo movement locations.
+                </p>
+            </div>
+
+            <div class="map-status">
+                <span class="live-dot"></span>
+                MAP ONLINE
+            </div>
+
+        </div>
+
+        <div class="map-wrapper">
+
+            <div id="globalMap"></div>
+
+            <div class="map-info">
+                <div class="map-info-icon">◎</div>
+
+                <div>
+                    <strong>Global Cargo Map</strong>
+
+                    <small>
+                        Shipment locations will appear when authorized
+                        tracking events are recorded.
+                    </small>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="map-legend">
+            <span><i class="legend-dot blue"></i> Starting point</span>
+            <span><i class="legend-dot green"></i> Confirmed handover</span>
+            <span><i class="legend-dot orange"></i> Destination</span>
+        </div>
+
+    </section>
+
+
+    <!-- FEATURES -->
+
+    <section class="features-section" id="about">
+
+        <div class="section-heading">
+            <span class="section-label">WHY MAKYAMA</span>
+
+            <h2>Manage every cargo journey.</h2>
+
+            <p>
+                Designed to connect cargo owners, agents
+                and administrators through one platform.
+            </p>
+        </div>
+
+        <div class="feature-grid">
+
+            <article class="feature-card">
+                <div class="feature-icon">⌖</div>
+
+                <h3>GPS Tracking</h3>
+
+                <p>
+                    Capture shipment locations together with
+                    their date and time during transportation events.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">⇄</div>
+
+                <h3>Agent Handover</h3>
+
+                <p>
+                    Manage cargo transfers with an ordered
+                    confirmation process between agents.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">◈</div>
+
+                <h3>Secure Access</h3>
+
+                <p>
+                    Separate access permissions for cargo owners,
+                    agents and administrators.
+                </p>
+            </article>
+
+            <article class="feature-card">
+                <div class="feature-icon">◎</div>
+
+                <h3>Journey History</h3>
+
+                <p>
+                    Authorized users can review recorded
+                    cargo movement events.
+                </p>
+            </article>
+
+        </div>
+
+    </section>
+
+
+    <!-- CALL TO ACTION -->
+
+    <section class="access-section">
+
+        <div>
+            <span class="section-label">MAKYAMA PLATFORM</span>
+
+            <h2>Your cargo journey starts here.</h2>
+
+            <p>
+                Access the platform using your assigned cargo
+                identification and personal access code.
+            </p>
+        </div>
+
+        <a href="/login" class="primary-button">
+            Enter Cargo Platform →
+        </a>
+
+    </section>
+
+</main>
+
+
+<!-- FOOTER -->
+
+<footer class="footer">
+
+    <div class="footer-top">
+
+        <a href="/" class="brand">
+            <div class="brand-logo">M</div>
+
+            <div class="brand-name">
+                <strong>MAKYAMA</strong>
+                <span>CARGO TRACKER</span>
+            </div>
+        </a>
+
+        <p>Global Cargo Tracking & Management System</p>
+
+    </div>
+
+    <div class="footer-bottom">
+        <small>© 2026 MAKYAMA CARGO TRACKER. All rights reserved.</small>
+        <small>GLOBAL LOGISTICS MANAGEMENT</small>
+    </div>
+
+</footer>
+
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+
+</body>
+</html>
