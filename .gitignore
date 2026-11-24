@@ -1,10 +1,7 @@
-
 __pycache__/
 *.pyc
+*.db
+instance/
 .env
 venv/
-.venv/
-.firebase/
-serviceAccountKey.json
-firebase-key.json
-.DS_Store
+firebase-credentials.json
