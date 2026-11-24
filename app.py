@@ -1,908 +1,493 @@
-
 import os
 import json
-import secrets
-import hashlib
-import hmac
-import logging
+import random
+import string
 from datetime import datetime, timezone, timedelta
 from functools import wraps
-
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 import firebase_admin
-from firebase_admin import credentials, db
-
-from flask import (
-    Flask, request, jsonify, render_template,
-    session, redirect, url_for
-)
-
-# =====================================================
-# MAKYAMA CARGO TRACKER
-# Backend foundation
-# =====================================================
+from firebase_admin import credentials, db as rtdb
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'makyama-secret-key-2026')
 
-app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY", ""),
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SECURE=os.environ.get("RENDER") is not None,
-    SESSION_COOKIE_SAMESITE="Lax",
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
-    MAX_CONTENT_LENGTH=2 * 1024 * 1024
-)
+DEFAULT_DB_URL = "https://makyama-cargo-tracker-default-rtdb.firebaseio.com/"
 
-logging.basicConfig(level=logging.INFO)
+# ================= FIREBASE REALTIME DB INIT =================
+def init_rtdb():
+    database_url = os.environ.get('FIREBASE_DB_URL', DEFAULT_DB_URL)
 
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+    if not firebase_admin._apps:
+        creds_json = os.environ.get('FIREBASE_CREDENTIALS_JSON')
+        creds_path = os.environ.get('FIREBASE_CREDENTIALS_PATH', 'firebase-credentials.json')
 
-firebase_ready = False
-
-
-# =====================================================
-# FIREBASE INITIALIZATION
-# =====================================================
-
-try:
-    service_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
-    database_url = os.environ.get("FIREBASE_DATABASE_URL")
-
-    if service_json and database_url:
-        service_account = json.loads(service_json)
-
-        if not firebase_admin._apps:
-            credential = credentials.Certificate(service_account)
-
-            firebase_admin.initialize_app(
-                credential,
-                {"databaseURL": database_url}
+        if creds_json:
+            cred = credentials.Certificate(json.loads(creds_json))
+        elif os.path.exists(creds_path):
+            cred = credentials.Certificate(creds_path)
+        else:
+            raise RuntimeError(
+                "Hakuna Firebase credentials! Weka FIREBASE_CREDENTIALS_JSON au weka firebase-credentials.json."
             )
 
-        firebase_ready = True
-        app.logger.info("Firebase connected.")
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': database_url
+        })
 
+    return rtdb.reference('shipments')
+
+shipments_ref = init_rtdb()
+
+# Saa ya Afrika Mashariki (EAT - UTC+3)
+EAT = timezone(timedelta(hours=3))
+
+def get_eat_now():
+    return datetime.now(EAT).strftime("%Y-%m-%d %H:%M:%S")
+
+def generate_code(prefix):
+    chars = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+    return f"{prefix}-{chars}"
+
+def empty_ticks():
+    return {
+        "arrived": {"done": False, "time": None, "lat": None, "lng": None},
+        "received": {"done": False, "time": None, "lat": None, "lng": None},
+        "dispatched": {"done": False, "time": None, "lat": None, "lng": None},
+    }
+
+def agent_completed(ag):
+    ticks = ag.get('ticks') or {}
+    return (
+        bool((ticks.get('arrived') or {}).get('done')) and
+        bool((ticks.get('received') or {}).get('done')) and
+        bool((ticks.get('dispatched') or {}).get('done'))
+    )
+
+def serialize_agent(ag, include_code=True):
+    ticks = ag.get("ticks") or {}
+    data = {
+        "id": ag.get("id"),
+        "step_order": ag.get("step_order"),
+        "agent_name": ag.get("agent_name"),
+        "location_point": ag.get("location_point"),
+        "is_completed": agent_completed(ag),
+        "ticks": {
+            "arrived": ticks.get("arrived") or {"done": False, "time": None, "lat": None, "lng": None},
+            "received": ticks.get("received") or {"done": False, "time": None, "lat": None, "lng": None},
+            "dispatched": ticks.get("dispatched") or {"done": False, "time": None, "lat": None, "lng": None},
+        }
+    }
+    if include_code:
+        data["agent_code"] = ag.get("agent_code")
+    return data
+
+def normalize_agents_list(raw_agents):
+    if not raw_agents:
+        return []
+    if isinstance(raw_agents, dict):
+        items = list(raw_agents.values())
+    elif isinstance(raw_agents, list):
+        items = [a for a in raw_agents if a is not None]
     else:
-        app.logger.warning("Firebase configuration missing.")
+        items = []
+    return sorted(items, key=lambda x: x.get("step_order", 0))
 
-except Exception:
-    app.logger.exception("Firebase initialization failed.")
+def get_all_shipments():
+    raw = shipments_ref.get() or {}
+    if not isinstance(raw, dict):
+        return []
+    result = []
+    for key, val in raw.items():
+        if isinstance(val, dict):
+            item = dict(val)
+            item["id"] = key
+            item["agents"] = normalize_agents_list(item.get("agents"))
+            result.append(item)
+    return result
 
+def get_cargo_by_name(cargo_name):
+    clean_name = (cargo_name or "").strip().upper()
+    if not clean_name:
+        return None
+    for item in get_all_shipments():
+        if (item.get("cargo_name") or "").strip().upper() == clean_name:
+            return item
+    return None
 
-def ref(path):
-    if not firebase_ready:
-        raise RuntimeError("Firebase is not connected.")
+# ================= ADMIN AUTH DECORATOR =================
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('is_admin'):
+            return redirect(url_for('login_page'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-    return db.reference(path)
+# ================= PAGE ROUTES =================
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-
-# =====================================================
-# COMMON HELPERS
-# =====================================================
-
-def now_utc():
-    return datetime.now(timezone.utc).isoformat()
-
-
-def generate_code():
-    return secrets.token_urlsafe(12)
-
-
-def hash_code(code):
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
-
-
-def verify_code(code, stored_hash):
-    if not code or not stored_hash:
-        return False
-
-    return hmac.compare_digest(
-        hash_code(code),
-        stored_hash
-    )
-
-
-def response_error(message, status=400):
-    return jsonify({
-        "success": False,
-        "message": message
-    }), status
-
-
-def get_json():
-    return request.get_json(silent=True) or {}
-
-
-def admin_required(function):
-    @wraps(function)
-    def wrapper(*args, **kwargs):
-        if session.get("role") != "admin":
-            return response_error("Admin authorization required.", 401)
-
-        return function(*args, **kwargs)
-
-    return wrapper
-
-
-def user_required(function):
-    @wraps(function)
-    def wrapper(*args, **kwargs):
-        if session.get("role") not in ("owner", "agent"):
-            return response_error("Login required.", 401)
-
-        return function(*args, **kwargs)
-
-    return wrapper
-
-
-def get_cargo(cargo_id):
-    return ref(f"cargos/{cargo_id}").get()
-
-
-def save_event(cargo_id, actor, action, location):
-    event = {
-        "actor_id": actor.get("actor_id"),
-        "actor_name": actor.get("actor_name"),
-        "actor_role": actor.get("role"),
-        "action": action,
-        "latitude": location.get("latitude"),
-        "longitude": location.get("longitude"),
-        "accuracy": location.get("accuracy"),
-        "recorded_at": now_utc()
-    }
-
-    ref(f"cargos/{cargo_id}/events").push(event)
-
-    return event
-
-
-# =====================================================
-# WEB PAGES
-# =====================================================
-
-@app.route("/")
-def home():
-    return render_template("index.html")
-
-
-@app.route("/login")
-def login_page():
-    return render_template("login.html")
-
-
-@app.route("/register")
+@app.route('/register')
 def register_page():
-    return render_template("register.html")
+    return render_template('register.html')
 
+@app.route('/cargo/<cargo_name>')
+def cargo_page(cargo_name):
+    return render_template('cargo.html', cargo_name=cargo_name.upper())
 
-@app.route("/dashboard")
-def dashboard_page():
-    if not session.get("role"):
-        return redirect(url_for("login_page"))
+@app.route('/login', methods=['GET', 'POST'])
+def login_page():
+    if request.method == 'POST':
+        data = request.get_json() if request.is_json else request.form
+        username = (data.get('username') or '').strip()
+        password = (data.get('password') or '').strip()
 
-    return render_template("dashboard.html")
+        admin_user = os.environ.get('ADMIN_USERNAME', 'admin')
+        admin_pass = os.environ.get('ADMIN_PASSWORD', 'makyama2026')
 
+        if username == admin_user and password == admin_pass:
+            session['is_admin'] = True
+            return jsonify({"success": True, "redirect": "/admin"}) if request.is_json else redirect('/admin')
+        return jsonify({"success": False, "message": "Username au Password sio sahihi!"}), 401
+    return render_template('login.html')
 
-@app.route("/admin")
-def admin_page():
-    if session.get("role") != "admin":
-        return render_template("admin.html")
-
-    return render_template("admin.html")
-
-
-# =====================================================
-# SYSTEM HEALTH
-# =====================================================
-
-@app.route("/health")
-def health():
-    return jsonify({
-        "system": "MAKYAMA CARGO TRACKER",
-        "server": "online",
-        "firebase": "connected" if firebase_ready else "disconnected"
-    })
-
-
-# =====================================================
-# ADMIN LOGIN
-# =====================================================
-
-@app.route("/api/admin/login", methods=["POST"])
-def admin_login():
-    data = get_json()
-
-    username = str(data.get("username", ""))
-    password = str(data.get("password", ""))
-
-    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
-        return response_error("Admin credentials not configured.", 503)
-
-    username_ok = hmac.compare_digest(
-        username.encode(),
-        ADMIN_USERNAME.encode()
-    )
-
-    password_ok = hmac.compare_digest(
-        password.encode(),
-        ADMIN_PASSWORD.encode()
-    )
-
-    if not (username_ok and password_ok):
-        return response_error("Invalid login credentials.", 401)
-
-    session.clear()
-    session.permanent = True
-    session["role"] = "admin"
-
-    return jsonify({
-        "success": True,
-        "message": "Admin login successful."
-    })
-
-
-# =====================================================
-# OWNER / AGENT LOGIN
-# =====================================================
-
-@app.route("/api/cargo/access", methods=["POST"])
-def cargo_access():
-    data = get_json()
-
-    cargo_id = str(data.get("cargo_id", "")).strip()
-    code = str(data.get("code", "")).strip()
-
-    if not cargo_id or not code:
-        return response_error("Cargo ID and access code required.")
-
-    cargo = get_cargo(cargo_id)
-
-    if not cargo:
-        return response_error("Cargo not found.", 404)
-
-    if verify_code(code, cargo.get("owner_code_hash")):
-        session.clear()
-        session.permanent = True
-        session["role"] = "owner"
-        session["cargo_id"] = cargo_id
-        session["actor_id"] = "owner"
-        session["actor_name"] = cargo.get("owner_name", "Owner")
-
-        return jsonify({
-            "success": True,
-            "role": "owner"
-        })
-
-    agents = cargo.get("agents", {})
-
-    for agent_id, agent in agents.items():
-        if verify_code(code, agent.get("code_hash")):
-            session.clear()
-            session.permanent = True
-            session["role"] = "agent"
-            session["cargo_id"] = cargo_id
-            session["actor_id"] = agent_id
-            session["actor_name"] = agent.get("name")
-
-            return jsonify({
-                "success": True,
-                "role": "agent",
-                "agent_name": agent.get("name")
-            })
-
-    return response_error("Invalid access code.", 401)
-
-
-@app.route("/api/logout", methods=["POST"])
+@app.route('/logout')
 def logout():
-    session.clear()
+    session.pop('is_admin', None)
+    return redirect(url_for('index'))
 
-    return jsonify({"success": True})
+@app.route('/admin')
+@admin_required
+def admin_page():
+    return render_template('admin.html')
 
+# ================= API ENDPOINTS =================
 
-# =====================================================
-# CARGO REGISTRATION
-# =====================================================
+# 1. Sajili Mzigo Mpya
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    data = request.get_json() or {}
+    cargo_name = (data.get('cargo_name') or '').strip().upper()
+    origin = (data.get('origin') or '').strip()
+    destination = (data.get('destination') or '').strip()
+    registered_by = (data.get('registered_by') or 'OWNER').strip().upper()
+    owner_name = (data.get('owner_name') or '').strip()
+    agents_list = data.get('agents') or []
 
-@app.route("/api/cargo/register", methods=["POST"])
-def register_cargo():
-    data = get_json()
+    if registered_by not in ('OWNER', 'AGENT_1'):
+        registered_by = 'OWNER'
 
-    cargo_name = str(data.get("cargo_name", "")).strip()
-    destination = str(data.get("destination", "")).strip()
-    owner_name = str(data.get("owner_name", "")).strip()
-    registrar_role = str(data.get("registrar_role", "")).strip()
-    registrar_name = str(data.get("registrar_name", "")).strip()
+    if not cargo_name or not origin or not destination or not owner_name or not agents_list:
+        return jsonify({"success": False, "message": "Tafadhali jaza taarifa zote na angalau agent mmoja."}), 400
 
-    if not all([
-        cargo_name,
-        destination,
-        owner_name,
-        registrar_role,
-        registrar_name
-    ]):
-        return response_error("Please complete all required fields.")
+    if get_cargo_by_name(cargo_name):
+        return jsonify({"success": False, "message": "Jina hili la mzigo limeshatumika. Chagua jina lingine."}), 400
 
-    if registrar_role not in ("owner", "agent1"):
-        return response_error("Invalid registrar role.")
+    owner_code = generate_code("OWN")
+    agents_docs = []
+    generated_agents = []
 
-    agents_input = data.get("agents", [])
+    for idx, ag in enumerate(agents_list, start=1):
+        ag_name = (ag.get('name') or '').strip()
+        ag_loc = (ag.get('location') or '').strip()
+        if not ag_name or not ag_loc:
+            return jsonify({"success": False, "message": f"Kamilisha jina na kituo cha Agent {idx}."}), 400
 
-    if not isinstance(agents_input, list):
-        return response_error("Invalid agents list.")
+        ag_code = generate_code(f"AGT{idx}")
+        ag_id = f"ag_{idx}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
 
-    if len(agents_input) > 50:
-        return response_error("Maximum 50 agents allowed.")
-
-    cargo_id = secrets.token_urlsafe(12)
-    owner_code = generate_code()
-
-    agents = {}
-    issued_codes = []
-
-    for index, item in enumerate(agents_input):
-        if not isinstance(item, dict):
-            continue
-
-        name = str(item.get("name", "")).strip()
-
-        if not name:
-            continue
-
-        agent_id = f"agent_{index + 1}"
-        code = generate_code()
-
-        agents[agent_id] = {
-            "name": name,
-            "sequence": index + 1,
-            "code_hash": hash_code(code),
-            "status": "waiting"
-        }
-
-        issued_codes.append({
-            "agent_id": agent_id,
-            "name": name,
-            "code": code
+        agents_docs.append({
+            "id": ag_id,
+            "step_order": idx,
+            "agent_name": ag_name,
+            "location_point": ag_loc,
+            "agent_code": ag_code,
+            "ticks": empty_ticks()
+        })
+        generated_agents.append({
+            "step": idx,
+            "name": ag_name,
+            "location": ag_loc,
+            "code": ag_code
         })
 
-    cargo = {
-        "cargo_id": cargo_id,
+    new_ref = shipments_ref.push()
+    new_ref.set({
         "cargo_name": cargo_name,
+        "origin": origin,
         "destination": destination,
+        "registered_by": registered_by,
         "owner_name": owner_name,
-        "owner_code_hash": hash_code(owner_code),
-        "registrar_role": registrar_role,
-        "registrar_name": registrar_name,
-        "agents": agents,
-        "status": "registered",
-        "started": False,
-        "current_agent_index": 0,
-        "pending_receiver": None,
-        "owner_received": False,
-        "created_at": now_utc(),
-        "events": {}
-    }
-
-    ref(f"cargos/{cargo_id}").set(cargo)
-
-    return jsonify({
-        "success": True,
-        "cargo_id": cargo_id,
         "owner_code": owner_code,
-        "agent_codes": issued_codes,
-        "message": "Cargo registered successfully. Save all access codes securely."
-    }), 201
-
-
-# =====================================================
-# PUBLIC CARGO SEARCH
-# =====================================================
-
-@app.route("/api/cargo/search")
-def search_cargo():
-    name = request.args.get("name", "").strip().lower()
-
-    if len(name) < 2:
-        return response_error("Enter at least two characters.")
-
-    try:
-        cargos = ref("cargos").get() or {}
-        results = []
-
-        for cargo_id, cargo in cargos.items():
-            if name in cargo.get("cargo_name", "").lower():
-                results.append({
-                    "cargo_id": cargo_id,
-                    "cargo_name": cargo.get("cargo_name"),
-                    "destination": cargo.get("destination"),
-                    "status": cargo.get("status")
-                })
-
-        return jsonify({
-            "success": True,
-            "results": results[:30]
-        })
-
-    except Exception:
-        app.logger.exception("Cargo search failed")
-        return response_error("Search unavailable.", 503)
-
-
-# =====================================================
-# CARGO INFORMATION
-# =====================================================
-
-@app.route("/api/cargo/current")
-@user_required
-def current_cargo():
-    cargo_id = session.get("cargo_id")
-    cargo = get_cargo(cargo_id)
-
-    if not cargo:
-        return response_error("Cargo not found.", 404)
-
-    role = session.get("role")
-    actor_id = session.get("actor_id")
-
-    if role == "owner":
-        return jsonify({
-            "success": True,
-            "cargo": cargo
-        })
-
-    agent = cargo.get("agents", {}).get(actor_id)
-
-    if not agent:
-        return response_error("Agent access is no longer valid.", 403)
-
-    # Agents receive only their own assignment and event records.
-    own_events = {
-        event_id: event
-        for event_id, event in cargo.get("events", {}).items()
-        if event.get("actor_id") == actor_id
-    }
+        "created_at": get_eat_now(),
+        "agents": agents_docs
+    })
 
     return jsonify({
         "success": True,
+        "cargo_name": cargo_name,
+        "owner_code": owner_code,
+        "agents": generated_agents
+    })
+
+# 2. Tafuta Mzigo kwa Jina (Search)
+@app.route('/api/search', methods=['GET'])
+def api_search():
+    query = (request.args.get('q') or '').strip().upper()
+    cargo = get_cargo_by_name(query)
+    if not cargo:
+        return jsonify({"success": False, "message": "Mzigo haujapatikana. Hakikisha umeandika jina sahihi."}), 404
+    return jsonify({
+        "success": True,
+        "cargo_name": cargo["cargo_name"],
+        "origin": cargo.get("origin", ""),
+        "destination": cargo.get("destination", ""),
+        "created_at": cargo.get("created_at", "")
+    })
+
+# 3. Fungua Mzigo kwa Code (Access Control)
+@app.route('/api/access', methods=['POST'])
+def api_access():
+    data = request.get_json() or {}
+    cargo_name = (data.get('cargo_name') or '').strip().upper()
+    code = (data.get('code') or '').strip().upper()
+
+    cargo = get_cargo_by_name(cargo_name)
+    if not cargo:
+        return jsonify({"success": False, "message": "Mzigo haupo kwenye mfumo."}), 404
+
+    agents = cargo["agents"]
+
+    # Kama ni Owner
+    if code == (cargo.get("owner_code") or "").upper():
+        return jsonify({
+            "success": True,
+            "role": "OWNER",
+            "can_view_all": True,
+            "can_manage_agents": True,
+            "can_reset_codes": True,
+            "cargo": {
+                "cargo_name": cargo["cargo_name"],
+                "origin": cargo.get("origin", ""),
+                "destination": cargo.get("destination", ""),
+                "registered_by": cargo.get("registered_by", "OWNER"),
+                "owner_name": cargo.get("owner_name", ""),
+                "created_at": cargo.get("created_at", ""),
+                "agents": [serialize_agent(a, include_code=True) for a in agents]
+            }
+        })
+
+    # Kama ni Agent
+    target_agent = next((a for a in agents if (a.get("agent_code") or "").upper() == code), None)
+    if not target_agent:
+        return jsonify({"success": False, "message": "Code uliyoingiza sio sahihi kwa mzigo huu!"}), 403
+
+    step = target_agent.get("step_order", 1)
+    is_agent_1_creator = (step == 1 and cargo.get("registered_by") == 'AGENT_1')
+
+    prev_completed = True
+    if step > 1:
+        prev_agent = next((a for a in agents if a.get("step_order") == step - 1), None)
+        if prev_agent and not agent_completed(prev_agent):
+            prev_completed = False
+
+    if is_agent_1_creator:
+        visible_agents = [serialize_agent(a, include_code=True) for a in agents]
+    else:
+        visible_agents = [serialize_agent(target_agent, include_code=True)]
+
+    return jsonify({
+        "success": True,
+        "role": f"AGENT_{step}",
+        "current_agent_id": target_agent.get("id"),
+        "can_view_all": is_agent_1_creator,
+        "can_manage_agents": False,
+        "can_reset_codes": is_agent_1_creator,
+        "prev_agent_completed": prev_completed,
         "cargo": {
-            "cargo_id": cargo_id,
-            "cargo_name": cargo.get("cargo_name"),
-            "destination": cargo.get("destination"),
-            "status": cargo.get("status"),
-            "my_assignment": agent,
-            "my_events": own_events
+            "cargo_name": cargo["cargo_name"],
+            "origin": cargo.get("origin", ""),
+            "destination": cargo.get("destination", ""),
+            "registered_by": cargo.get("registered_by", "OWNER"),
+            "owner_name": cargo.get("owner_name", ""),
+            "created_at": cargo.get("created_at", ""),
+            "agents": visible_agents
         }
     })
 
+# 4. Kutia Tick (Na GPS + Muda)
+@app.route('/api/tick', methods=['POST'])
+def api_tick():
+    data = request.get_json() or {}
+    cargo_name = (data.get('cargo_name') or '').strip().upper()
+    code = (data.get('code') or '').strip().upper()
+    tick_type = (data.get('tick_type') or '').strip()
+    lat = data.get('lat')
+    lng = data.get('lng')
 
-# =====================================================
-# START TRANSPORTATION
-# =====================================================
-
-@app.route("/api/cargo/start", methods=["POST"])
-@user_required
-def start_transportation():
-    cargo_id = session.get("cargo_id")
-    cargo = get_cargo(cargo_id)
-
-    if not cargo:
-        return response_error("Cargo not found.", 404)
-
-    if cargo.get("started"):
-        return response_error("Transportation has already started.")
-
-    if session.get("role") != "agent":
-        return response_error("Only the first assigned agent can start.")
-
-    actor_id = session.get("actor_id")
-    agents = cargo.get("agents", {})
-    agent_ids = list(agents.keys())
-
-    if not agent_ids or actor_id != agent_ids[0]:
-        return response_error("Only Agent 1 can start transportation.", 403)
-
-    data = get_json()
-    location = data.get("location", {})
-
-    if not isinstance(location, dict):
-        return response_error("Location is required.")
+    if lat is None or lng is None:
+        return jsonify({"success": False, "message": "Lazima uwashe GPS Location ya simu yako kabla ya kutia tick!"}), 400
 
     try:
-        latitude = float(location["latitude"])
-        longitude = float(location["longitude"])
+        lat_val = float(lat)
+        lng_val = float(lng)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "Coordinates za GPS sio sahihi."}), 400
 
-        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-            raise ValueError()
-
-    except (KeyError, TypeError, ValueError):
-        return response_error("Valid GPS coordinates are required.")
-
-    actor = {
-        "actor_id": actor_id,
-        "actor_name": session.get("actor_name"),
-        "role": "agent"
-    }
-
-    event = save_event(
-        cargo_id,
-        actor,
-        "START_TRANSPORTATION",
-        location
-    )
-
-    ref(f"cargos/{cargo_id}").update({
-        "started": True,
-        "status": "in_transit",
-        "current_agent_index": 0,
-        "starting_location": {
-            "latitude": latitude,
-            "longitude": longitude,
-            "recorded_at": event["recorded_at"]
-        }
-    })
-
-    return jsonify({
-        "success": True,
-        "message": "Transportation started.",
-        "event": event
-    })
-
-
-# =====================================================
-# HANDOVER AND RECEIVING
-# =====================================================
-
-@app.route("/api/cargo/handover", methods=["POST"])
-@user_required
-def cargo_handover():
-    cargo_id = session.get("cargo_id")
-    cargo = get_cargo(cargo_id)
-
+    cargo = get_cargo_by_name(cargo_name)
     if not cargo:
-        return response_error("Cargo not found.", 404)
+        return jsonify({"success": False, "message": "Mzigo hatambuliki."}), 403
 
-    if not cargo.get("started"):
-        return response_error("Transportation has not started.")
+    agents = cargo["agents"]
+    agent_idx = next((i for i, a in enumerate(agents) if (a.get("agent_code") or "").upper() == code), None)
+    if agent_idx is None:
+        return jsonify({"success": False, "message": "Code ya Agent haitambuliki."}), 403
 
-    actor_id = session.get("actor_id")
-    agents = cargo.get("agents", {})
-    agent_ids = list(agents.keys())
+    agent = agents[agent_idx]
+    step = agent.get("step_order", 1)
 
-    if actor_id not in agent_ids:
-        return response_error("Invalid agent.", 403)
+    if step > 1:
+        prev_agent = next((a for a in agents if a.get("step_order") == step - 1), None)
+        if prev_agent and not agent_completed(prev_agent):
+            return jsonify({
+                "success": False,
+                "message": f"Huwezi kutia tick! Subiri Agent {step - 1} amalize hatua zake zote."
+            }), 403
 
-    current_index = cargo.get("current_agent_index", 0)
+    ticks = dict(agent.get("ticks") or empty_ticks())
+    now_str = get_eat_now()
 
-    if agent_ids[current_index] != actor_id:
-        return response_error("It is not your turn to hand over.", 403)
+    if tick_type == 'arrived':
+        ticks['arrived'] = {"done": True, "time": now_str, "lat": lat_val, "lng": lng_val}
+    elif tick_type == 'received':
+        if not (ticks.get('arrived') or {}).get('done'):
+            return jsonify({"success": False, "message": "Tia tick ya 'Nimefika Eneo' kwanza!"}), 400
+        ticks['received'] = {"done": True, "time": now_str, "lat": lat_val, "lng": lng_val}
+    elif tick_type == 'dispatched':
+        if not (ticks.get('received') or {}).get('done'):
+            return jsonify({"success": False, "message": "Tia tick ya 'Nimepokea Mzigo' kwanza!"}), 400
+        ticks['dispatched'] = {"done": True, "time": now_str, "lat": lat_val, "lng": lng_val}
+    else:
+        return jsonify({"success": False, "message": "Aina ya tick haipo."}), 400
 
-    if cargo.get("pending_receiver"):
-        return response_error("Previous handover has not been received.")
+    agent['ticks'] = ticks
+    agents[agent_idx] = agent
+    shipments_ref.child(cargo["id"]).child("agents").set(agents)
 
-    if current_index + 1 >= len(agent_ids):
-        return response_error("No next agent assigned.")
+    return jsonify({"success": True, "message": "Tick imerekodiwa kikamilifu!", "time": now_str})
 
-    data = get_json()
-    location = data.get("location", {})
+# 5. Kuomba Code Mpya ya Agent
+@app.route('/api/reset-code', methods=['POST'])
+def api_reset_code():
+    data = request.get_json() or {}
+    cargo_name = (data.get('cargo_name') or '').strip().upper()
+    requester_code = (data.get('requester_code') or '').strip().upper()
+    target_agent_id = data.get('agent_id')
 
-    try:
-        latitude = float(location["latitude"])
-        longitude = float(location["longitude"])
-
-        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-            raise ValueError()
-
-    except (KeyError, TypeError, ValueError):
-        return response_error("Valid GPS coordinates required.")
-
-    next_agent_id = agent_ids[current_index + 1]
-
-    actor = {
-        "actor_id": actor_id,
-        "actor_name": session.get("actor_name"),
-        "role": "agent"
-    }
-
-    event = save_event(
-        cargo_id,
-        actor,
-        "HANDOVER_OUT",
-        location
-    )
-
-    ref(f"cargos/{cargo_id}").update({
-        "pending_receiver": next_agent_id
-    })
-
-    return jsonify({
-        "success": True,
-        "message": "Handover recorded. Waiting for next agent.",
-        "next_agent": agents[next_agent_id].get("name"),
-        "event": event
-    })
-
-
-@app.route("/api/cargo/receive", methods=["POST"])
-@user_required
-def cargo_receive():
-    cargo_id = session.get("cargo_id")
-    cargo = get_cargo(cargo_id)
-
+    cargo = get_cargo_by_name(cargo_name)
     if not cargo:
-        return response_error("Cargo not found.", 404)
+        return jsonify({"success": False, "message": "Mzigo haujapatikana."}), 404
 
-    actor_id = session.get("actor_id")
+    agents = cargo["agents"]
+    target_idx = next((i for i, a in enumerate(agents) if a.get("id") == target_agent_id), None)
+    if target_idx is None:
+        return jsonify({"success": False, "message": "Agent hajapatikana."}), 404
 
-    if session.get("role") != "agent":
-        return response_error("Only an assigned agent can receive.", 403)
-
-    if cargo.get("pending_receiver") != actor_id:
-        return response_error("You are not the expected receiver.", 403)
-
-    data = get_json()
-    location = data.get("location", {})
-
-    try:
-        latitude = float(location["latitude"])
-        longitude = float(location["longitude"])
-
-        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-            raise ValueError()
-
-    except (KeyError, TypeError, ValueError):
-        return response_error("Valid GPS coordinates required.")
-
-    actor = {
-        "actor_id": actor_id,
-        "actor_name": session.get("actor_name"),
-        "role": "agent"
-    }
-
-    event = save_event(
-        cargo_id,
-        actor,
-        "RECEIVED_CARGO",
-        location
+    is_owner = (requester_code == (cargo.get("owner_code") or "").upper())
+    agent_1 = next((a for a in agents if a.get("step_order") == 1), None)
+    is_agent_1_creator = (
+        agent_1 is not None and
+        requester_code == (agent_1.get("agent_code") or "").upper() and
+        cargo.get("registered_by") == 'AGENT_1'
     )
 
-    agents = cargo.get("agents", {})
-    agent_ids = list(agents.keys())
-    next_index = agent_ids.index(actor_id)
+    if not (is_owner or is_agent_1_creator):
+        return jsonify({"success": False, "message": "Huna ruhusa ya kubadilisha code ya agent."}), 403
 
-    ref(f"cargos/{cargo_id}").update({
-        "pending_receiver": None,
-        "current_agent_index": next_index
-    })
+    target_agent = agents[target_idx]
+    new_code = generate_code(f"AGT{target_agent.get('step_order')}")
+    target_agent["agent_code"] = new_code
+    agents[target_idx] = target_agent
 
-    return jsonify({
-        "success": True,
-        "message": "Cargo received successfully.",
-        "event": event
-    })
+    shipments_ref.child(cargo["id"]).child("agents").set(agents)
+    return jsonify({"success": True, "new_code": new_code})
 
+# 6. Owner Kuongeza, Kubadili au Kufuta Agent
+@app.route('/api/manage-agent', methods=['POST'])
+def api_manage_agent():
+    data = request.get_json() or {}
+    owner_code = (data.get('owner_code') or '').strip().upper()
+    cargo_name = (data.get('cargo_name') or '').strip().upper()
+    action = (data.get('action') or '').strip().upper()
 
-# =====================================================
-# OWNER CONFIRMS FINAL RECEIPT
-# =====================================================
+    cargo = get_cargo_by_name(cargo_name)
+    if not cargo or (cargo.get("owner_code") or "").upper() != owner_code:
+        return jsonify({"success": False, "message": "Ni Owner pekee mwenye ruhusa hii!"}), 403
 
-@app.route("/api/cargo/owner-receive", methods=["POST"])
-@user_required
-def owner_receive():
-    if session.get("role") != "owner":
-        return response_error("Only the owner can confirm final receipt.", 403)
+    agents = cargo["agents"]
 
-    cargo_id = session.get("cargo_id")
-    cargo = get_cargo(cargo_id)
+    if action == 'ADD':
+        ag_name = (data.get('agent_name') or '').strip()
+        ag_loc = (data.get('location_point') or '').strip()
+        if not ag_name or not ag_loc:
+            return jsonify({"success": False, "message": "Jaza jina na kituo cha agent mpya."}), 400
 
-    if not cargo:
-        return response_error("Cargo not found.", 404)
-
-    if not cargo.get("started"):
-        return response_error("Transportation has not started.")
-
-    if cargo.get("pending_receiver"):
-        return response_error("A handover is still pending.")
-
-    data = get_json()
-    location = data.get("location", {})
-
-    try:
-        latitude = float(location["latitude"])
-        longitude = float(location["longitude"])
-
-        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-            raise ValueError()
-
-    except (KeyError, TypeError, ValueError):
-        return response_error("Valid GPS coordinates required.")
-
-    actor = {
-        "actor_id": "owner",
-        "actor_name": cargo.get("owner_name"),
-        "role": "owner"
-    }
-
-    event = save_event(
-        cargo_id,
-        actor,
-        "OWNER_CONFIRMED_RECEIPT",
-        location
-    )
-
-    ref(f"cargos/{cargo_id}").update({
-        "owner_received": True,
-        "status": "delivered",
-        "owner_received_at": event["recorded_at"],
-        "deletion_due_at": (
-            datetime.now(timezone.utc) + timedelta(days=7)
-        ).isoformat()
-    })
-
-    return jsonify({
-        "success": True,
-        "message": "Final receipt confirmed. Record scheduled for deletion after 7 days."
-    })
-
-
-# =====================================================
-# OWNER / REGISTRAR AGENT MANAGEMENT
-# =====================================================
-
-@app.route("/api/cargo/agents/add", methods=["POST"])
-@user_required
-def add_agent():
-    cargo_id = session.get("cargo_id")
-    cargo = get_cargo(cargo_id)
-
-    if not cargo:
-        return response_error("Cargo not found.", 404)
-
-    role = session.get("role")
-    actor_id = session.get("actor_id")
-
-    authorized = (
-        role == "owner" or
-        (
-            role == "agent" and
-            cargo.get("registrar_role") == "agent1" and
-            actor_id == "agent_1"
-        )
-    )
-
-    if not authorized:
-        return response_error("You cannot manage agents.", 403)
-
-    data = get_json()
-    name = str(data.get("name", "")).strip()
-
-    if not name:
-        return response_error("Agent name required.")
-
-    agents = cargo.get("agents", {})
-    new_index = len(agents) + 1
-
-    agent_id = f"agent_{new_index}"
-    code = generate_code()
-
-    ref(f"cargos/{cargo_id}/agents/{agent_id}").set({
-        "name": name,
-        "sequence": new_index,
-        "code_hash": hash_code(code),
-        "status": "waiting"
-    })
-
-    return jsonify({
-        "success": True,
-        "agent_id": agent_id,
-        "agent_code": code
-    }), 201
-
-
-# =====================================================
-# ADMIN: VIEW ALL CARGOS
-# =====================================================
-
-@app.route("/api/admin/cargos")
-@admin_required
-def admin_cargos():
-    try:
-        cargos = ref("cargos").get() or {}
-
-        safe_cargos = {}
-
-        for cargo_id, cargo in cargos.items():
-            cargo.pop("owner_code_hash", None)
-
-            for agent in cargo.get("agents", {}).values():
-                agent.pop("code_hash", None)
-
-            safe_cargos[cargo_id] = cargo
-
-        return jsonify({
-            "success": True,
-            "cargos": safe_cargos
+        next_step = len(agents) + 1
+        new_code = generate_code(f"AGT{next_step}")
+        ag_id = f"ag_{next_step}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
+        agents.append({
+            "id": ag_id,
+            "step_order": next_step,
+            "agent_name": ag_name,
+            "location_point": ag_loc,
+            "agent_code": new_code,
+            "ticks": empty_ticks()
         })
+        shipments_ref.child(cargo["id"]).child("agents").set(agents)
+        return jsonify({"success": True, "new_code": new_code})
 
-    except Exception:
-        app.logger.exception("Admin cargo retrieval failed")
-        return response_error("Unable to retrieve cargo records.", 503)
+    elif action == 'EDIT':
+        ag_id = data.get('agent_id')
+        for ag in agents:
+            if ag.get("id") == ag_id:
+                if data.get('agent_name'):
+                    ag["agent_name"] = data.get('agent_name').strip()
+                if data.get('location_point'):
+                    ag["location_point"] = data.get('location_point').strip()
+                shipments_ref.child(cargo["id"]).child("agents").set(agents)
+                return jsonify({"success": True})
 
+    elif action == 'DELETE':
+        ag_id = data.get('agent_id')
+        remaining = [ag for ag in agents if ag.get("id") != ag_id]
+        for idx, r_ag in enumerate(remaining, start=1):
+            r_ag["step_order"] = idx
+        shipments_ref.child(cargo["id"]).child("agents").set(remaining)
+        return jsonify({"success": True})
 
-# =====================================================
-# ADMIN: PERMANENT CARGO DELETION
-# =====================================================
+    return jsonify({"success": False, "message": "Kitendo hakijafanikiwa."}), 400
 
-@app.route("/api/admin/cargo/<cargo_id>/delete", methods=["DELETE"])
+# 7. Admin Data API
+@app.route('/api/admin/all-cargos', methods=['GET'])
 @admin_required
-def admin_delete_cargo(cargo_id):
-    cargo = get_cargo(cargo_id)
+def api_admin_all():
+    all_items = get_all_shipments()
+    all_items.reverse()
+    result = []
+    for c in all_items:
+        result.append({
+            "id": c.get("id"),
+            "cargo_name": c.get("cargo_name"),
+            "origin": c.get("origin", ""),
+            "destination": c.get("destination", ""),
+            "registered_by": c.get("registered_by", "OWNER"),
+            "owner_name": c.get("owner_name", ""),
+            "owner_code": c.get("owner_code", ""),
+            "created_at": c.get("created_at", ""),
+            "agents": [serialize_agent(a, include_code=True) for a in c.get("agents", [])]
+        })
+    return jsonify({"success": True, "cargos": result})
 
-    if not cargo:
-        return response_error("Cargo not found.", 404)
-
-    # Permanently deletes cargo, agents, GPS and event history.
-    ref(f"cargos/{cargo_id}").delete()
-
-    return jsonify({
-        "success": True,
-        "message": "Cargo and all associated records permanently deleted."
-    })
-
-
-# =====================================================
-# ADMIN LOGOUT
-# =====================================================
-
-@app.route("/api/admin/logout", methods=["POST"])
-@admin_required
-def admin_logout():
-    session.clear()
-    return jsonify({"success": True})
-
-
-# =====================================================
-# AUTOMATIC DELETION
-# =====================================================
-
-def delete_expired_cargos():
-    """
-    Called by a scheduled backend job.
-    Deletes cargo records seven days after owner receipt.
-    """
-
-    if not firebase_ready:
-        return
-
-    cargos = ref("cargos").get() or {}
-    current_time = datetime.now(timezone.utc)
-
-    for cargo_id, cargo in cargos.items():
-        due = cargo.get("deletion_due_at")
-
-        if not cargo.get("owner_received") or not due:
-            continue
-
-        try:
-            deletion_time = datetime.fromisoformat(
-                due.replace("Z", "+00:00")
-            )
-
-            if current_time >= deletion_time:
-                ref(f"cargos/{cargo_id}").delete()
-
-        except (ValueError, TypeError):
-            app.logger.warning(
-                "Invalid deletion date for cargo %s", cargo_id
-            )
-
-
-# =====================================================
-# APPLICATION ENTRY
-# =====================================================
-
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-        debug=False
-    )
+if __name__ == '__main__':
+    app.run(debug=True)
