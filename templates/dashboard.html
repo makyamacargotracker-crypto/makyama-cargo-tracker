@@ -1,0 +1,189 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#071426">
+    <title>Cargo Dashboard | MAKYAMA</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+    <style>
+        .dash-page { min-height:100vh; background:#071426; }
+        .dash-header {
+            padding:20px 5%; display:flex; justify-content:space-between;
+            align-items:center; border-bottom:1px solid rgba(255,255,255,.1);
+            gap:15px;
+        }
+        .dash-header h2 { font-size:17px; }
+        .dash-header p { color:#9aadc2; font-size:11px; margin-top:5px; }
+        .dash-content { max-width:1250px; margin:auto; padding:30px 5%; }
+        .dash-welcome { margin-bottom:25px; }
+        .dash-welcome h1 { font-size:27px; margin-bottom:8px; }
+        .dash-welcome p { color:#9aadc2; font-size:13px; }
+        .dash-grid {
+            display:grid; grid-template-columns:repeat(3,1fr);
+            gap:15px; margin-bottom:25px;
+        }
+        .dash-card {
+            padding:20px; background:#102238; border:1px solid rgba(255,255,255,.09);
+            border-radius:13px; min-width:0;
+        }
+        .dash-card small { color:#9aadc2; font-size:11px; }
+        .dash-card strong { display:block; margin-top:12px; font-size:17px; overflow-wrap:anywhere; }
+        .dash-section {
+            padding:23px; margin-bottom:20px; background:#102238;
+            border:1px solid rgba(255,255,255,.09); border-radius:13px;
+        }
+        .dash-section h3 { margin-bottom:18px; font-size:16px; }
+        .dash-section p { color:#a8b9cb; font-size:12px; line-height:1.8; }
+        .dash-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:18px; }
+        .action-btn {
+            padding:13px 17px; border:0; border-radius:8px;
+            background:#2589ff; color:white; font-weight:700;
+            font-size:12px; cursor:pointer;
+        }
+        .action-btn.green { background:#159e77; }
+        .action-btn.orange { background:#c47a23; }
+        .action-btn.red { background:#b73e4b; }
+        .action-btn:disabled { opacity:.45; cursor:not-allowed; }
+        .dash-map { width:100%; height:350px; border-radius:10px; }
+        .event-list { display:grid; gap:12px; }
+        .event-item {
+            padding:14px; border-left:3px solid #2589ff;
+            background:#0b1b2e; border-radius:5px;
+        }
+        .event-item strong { display:block; font-size:12px; margin-bottom:6px; }
+        .event-item small { color:#9aadc2; font-size:10px; }
+        .dash-message { margin-top:15px; color:#36d5e9; font-size:12px; }
+        .logout-btn {
+            padding:10px 15px; border:1px solid #53657a;
+            border-radius:8px; background:transparent; color:white;
+            cursor:pointer;
+        }
+        .agent-management { display:none; }
+        .agent-management input {
+            width:100%; padding:12px; margin:10px 0;
+            background:#091626; border:1px solid #34465d;
+            border-radius:8px; color:white;
+        }
+        @media(max-width:750px) {
+            .dash-grid { grid-template-columns:1fr 1fr; }
+            .dash-content { padding:25px 4%; }
+            .dash-header { padding:15px 4%; }
+        }
+        @media(max-width:450px) {
+            .dash-grid { grid-template-columns:1fr; }
+            .dash-welcome h1 { font-size:23px; }
+            .dash-section { padding:17px; }
+            .dash-map { height:280px; }
+        }
+    </style>
+</head>
+
+<body>
+<div class="dash-page">
+
+    <header class="dash-header">
+        <div class="brand">
+            <div class="brand-logo">M</div>
+            <div class="brand-name">
+                <strong>MAKYAMA</strong>
+                <span>CARGO TRACKER</span>
+            </div>
+        </div>
+
+        <button class="logout-btn" id="logoutButton">Logout ↗</button>
+    </header>
+
+    <main class="dash-content">
+
+        <section class="dash-welcome">
+            <h1>Transportation Dashboard</h1>
+            <p id="userWelcome">Loading your cargo information...</p>
+        </section>
+
+        <div class="dash-grid">
+            <article class="dash-card">
+                <small>CARGO NAME</small>
+                <strong id="cargoName">Loading...</strong>
+            </article>
+
+            <article class="dash-card">
+                <small>FINAL DESTINATION</small>
+                <strong id="cargoDestination">Loading...</strong>
+            </article>
+
+            <article class="dash-card">
+                <small>TRANSPORT STATUS</small>
+                <strong id="cargoStatus">Loading...</strong>
+            </article>
+        </div>
+
+        <section class="dash-section">
+            <h3>My Transportation Actions</h3>
+            <p id="actionDescription">
+                Your available actions will appear here.
+            </p>
+
+            <div class="dash-actions">
+                <button class="action-btn" id="startButton" disabled>
+                    Start Transportation
+                </button>
+
+                <button class="action-btn orange" id="handoverButton" disabled>
+                    Hand Over Cargo
+                </button>
+
+                <button class="action-btn green" id="receiveButton" disabled>
+                    Confirm Cargo Received
+                </button>
+
+                <button class="action-btn green" id="ownerReceiveButton" disabled>
+                    Confirm Final Receipt
+                </button>
+            </div>
+
+            <p class="dash-message" id="actionMessage" aria-live="polite"></p>
+        </section>
+
+        <section class="dash-section">
+            <h3>Journey Map</h3>
+            <p>Recorded GPS events will be displayed according to your access permissions.</p>
+            <div id="dashboardMap" class="dash-map"></div>
+        </section>
+
+        <section class="dash-section">
+            <h3>Journey History</h3>
+            <div class="event-list" id="eventList">
+                <p>Loading journey events...</p>
+            </div>
+        </section>
+
+        <section class="dash-section agent-management" id="agentManagement">
+            <h3>Manage Transportation Agents</h3>
+            <p>Authorized cargo owners or eligible registering Agent 1 can add agents.</p>
+
+            <input id="newAgentName" type="text" placeholder="New agent full name">
+
+            <button class="action-btn" id="addAgentButton">
+                Add Agent
+            </button>
+
+            <p class="dash-message" id="agentMessage"></p>
+        </section>
+
+        <section class="dash-section" id="issuedCodeSection" style="display:none">
+            <h3>New Agent Access Code</h3>
+            <p id="issuedCode"></p>
+        </section>
+
+    </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/cargo.js') }}"></script>
+</body>
+</html>
