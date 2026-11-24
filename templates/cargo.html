@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ cargo_name }} | MAKYAMA CARGO TRACKER</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="/" class="brand">
+        <div class="brand-icon">🌍</div>
+        <span>MAKYAMA TRACKER</span>
+      </a>
+      <div class="nav-links">
+        <span class="code-pill" id="navCargoName">{{ cargo_name }}</span>
+        <a href="/" class="btn btn-outline btn-sm">Tafuta Mwingine</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container">
+    <!-- Hatua ya 1: Ingiza Code -->
+    <div class="card" id="unlockSection" style="max-width: 480px; margin: 30px auto;">
+      <h2 style="margin-bottom: 6px;">🔐 Ingiza Code ya Mzigo</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 18px;">
+        Mzigo: <strong>{{ cargo_name }}</strong>. Ingiza code yako (Owner au Agent) ili kufungua.
+      </p>
+      <form id="unlockForm">
+        <div class="form-group">
+          <label>Code Yako ya Siri *</label>
+          <input type="text" id="accessCodeInput" class="form-control" placeholder="Mf. OWN-8X92A au AGT1-3K91B" required />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">🔓 Fungua Mzigo</button>
+      </form>
+      <div id="unlockError"></div>
+    </div>
+
+    <!-- Hatua ya 2: Taarifa za Mzigo, Global Map & Ticks -->
+    <div id="trackingWorkspace" style="display: none;">
+      <div class="card" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <h2 id="cargoTitle">-</h2>
+              <span class="badge-pill" id="roleBadge" style="margin: 0;">-</span>
+            </div>
+            <p id="routeSubtitle" style="color: var(--text-muted); margin-top: 6px;">-</p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button type="button" id="refreshCargoBtn" class="btn btn-outline btn-sm">🔄 Refresh Data</button>
+            <button type="button" id="lockAgainBtn" class="btn btn-danger btn-sm">Funga</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Global Map -->
+      <div class="card" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3>🌍 Global Map (GPS Live Points)</h3>
+          <span style="color: var(--text-muted); font-size: 0.84rem;">Alama zinaonekana kila tick inapobonyezwa</span>
+        </div>
+        <div id="globalMap" class="map-wrapper"></div>
+      </div>
+
+      <!-- Paneli ya Owner (Kuongeza Agent Mpya) -->
+      <div class="card" id="ownerManagePanel" style="display: none; margin-bottom: 20px;">
+        <h3 style="margin-bottom: 12px;">👑 Usimamizi wa Ma-Agent (Owner Pekee)</h3>
+        <form id="addNewAgentForm" class="grid-3" style="align-items: end;">
+          <div class="form-group" style="margin: 0;">
+            <label>Jina la Agent Mpya</label>
+            <input type="text" id="newAgentName" class="form-control" placeholder="Mf. Musa Ali" required />
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label>Kituo / Eneo Lake</label>
+            <input type="text" id="newAgentLocation" class="form-control" placeholder="Mf. Bandari Malindi" required />
+          </div>
+          <button type="submit" class="btn btn-success">+ Ongeza Agent</button>
+        </form>
+      </div>
+
+      <!-- Orodha ya Hatua & Ticks -->
+      <div id="actionAlert"></div>
+      <div id="agentsTimeline"></div>
+    </div>
+  </main>
+
+  <a href="https://wa.me/255740770786?text=Habari%20Makyama%20Cargo%20Tracker%2C%20nahitaji%20msaada%20kuhusu%20mzigo%20{{ cargo_name }}." target="_blank" class="whatsapp-float">
+    <span>💬</span> Customer Care: +255 740 770 786
+  </a>
+
+  <footer>
+    &copy; 2026 MAKYAMA CARGO TRACKER &bull; Customer Care WhatsApp:
+    <a href="https://wa.me/255740770786" target="_blank">+255 740 770 786</a>
+  </footer>
+
+  <script>
+    window.CARGO_NAME = "{{ cargo_name }}";
+  </script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/js/map.js"></script>
+  <script src="/static/js/cargo.js"></script>
+</body>
+</html>
