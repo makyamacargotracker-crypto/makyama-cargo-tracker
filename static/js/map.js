@@ -11,7 +11,6 @@ class MakyamaGlobalMap {
     if (!el) return;
 
     if (!this.map) {
-      // Kituo cha awali: Zanzibar / Afrika Mashariki (Global zoomable)
       this.map = L.map(this.elementId).setView([-6.1659, 39.2026], 6);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
@@ -37,6 +36,22 @@ class MakyamaGlobalMap {
     cargosList.forEach((cargo) => {
       const routeCoords = [];
 
+      // Alama ya mwanzo (Initial Point) ikiwa tayari Agent 1 ametia tick
+      if (cargo.initial_point && cargo.initial_point.lat != null && cargo.initial_point.lng != null) {
+        const initLatLng = [cargo.initial_point.lat, cargo.initial_point.lng];
+        allBounds.push(initLatLng);
+        L.circleMarker(initLatLng, { radius: 8, color: '#10b981', fillColor: '#10b981', fillOpacity: 0.9 })
+          .addTo(this.markersLayer)
+          .bindPopup(`
+            <div style="color:#0f172a; font-family:sans-serif;">
+              <strong>🚀 Mwanzo wa Safari (Initial)</strong><br/>
+              <b>Mzigo:</b> ${cargo.cargo_name}<br/>
+              <b>Agent 1:</b> ${cargo.initial_point.agent_name || '-'}<br/>
+              <b>Muda:</b> ${cargo.initial_point.time}
+            </div>
+          `);
+      }
+
       (cargo.agents || []).forEach((ag) => {
         const tickLabels = [
           { key: 'arrived', label: '1. Amefika Eneo' },
@@ -57,7 +72,6 @@ class MakyamaGlobalMap {
                 <strong>📦 ${cargo.cargo_name}</strong><br/>
                 <b>Agent ${ag.step_order}:</b> ${ag.agent_name}<br/>
                 <b>Hatua:</b> ${item.label}<br/>
-                <b>Kituo:</b> ${ag.location_point}<br/>
                 <b>Muda:</b> ${t.time}<br/>
                 <small>GPS: ${t.lat.toFixed(5)}, ${t.lng.toFixed(5)}</small>
               </div>
