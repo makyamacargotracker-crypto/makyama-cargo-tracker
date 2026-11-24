@@ -58,19 +58,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       adminList.innerHTML = list.map((c) => {
-        const agentsRows = (c.agents || []).map((a) => `
-          <tr>
-            <td>#${a.step_order}</td>
-            <td>${a.agent_name}</td>
-            <td><span class="code-pill">${a.agent_code}</span></td>
-            <td>${a.ticks.arrived.done ? '✅ ' + a.ticks.arrived.time : '⏳'}</td>
-            <td>${a.ticks.received.done ? '✅ ' + a.ticks.received.time : '⏳'}</td>
-            <td>${a.ticks.dispatched.done ? '✅ ' + a.ticks.dispatched.time : '⏳'}</td>
-          </tr>
-        `).join('');
+        const agentsRows = (c.agents || []).map((a) => {
+          const recText = a.ticks.received.done
+            ? `✅ ${a.ticks.received.place} (${a.ticks.received.time})`
+            : '⏳';
+          const disText = a.ticks.dispatched.done
+            ? `✅ ${a.ticks.dispatched.place} (${a.ticks.dispatched.time})`
+            : '⏳';
+          return `
+            <tr>
+              <td>#${a.step_order}</td>
+              <td>${a.agent_name}</td>
+              <td><span class="code-pill">${a.agent_code}</span></td>
+              <td>${recText}</td>
+              <td>${disText}</td>
+            </tr>
+          `;
+        }).join('');
 
         const initInfo = c.initial_point
-          ? ` | Mwanzo: ${c.initial_point.time} (${Number(c.initial_point.lat).toFixed(4)}, ${Number(c.initial_point.lng).toFixed(4)})`
+          ? ` | Mwanzo: <strong>${c.initial_point.place}</strong> (${c.initial_point.time})`
           : ' | Mwanzo: Bado';
 
         return `
@@ -95,9 +102,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <th>Hatua</th>
                     <th>Agent</th>
                     <th>Code</th>
-                    <th>Amefika</th>
-                    <th>Amepokea</th>
-                    <th>Ametoa</th>
+                    <th>Amepokea (Eneo & Muda)</th>
+                    <th>Ametoa (Eneo & Muda)</th>
                   </tr>
                 </thead>
                 <tbody>${agentsRows}</tbody>
