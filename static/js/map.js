@@ -1,132 +1,80 @@
+class MakyamaGlobalMap {
+  constructor(elementId) {
+    this.elementId = elementId;
+    this.map = null;
+    this.markersLayer = null;
+    this.lineLayer = null;
+  }
 
-"use strict";
+  init() {
+    const el = document.getElementById(this.elementId);
+    if (!el) return;
 
-// ==========================================
-// MAKYAMA CARGO TRACKER - GLOBAL MAP
-// ==========================================
+    if (!this.map) {
+      // Kituo cha awali: Zanzibar / Afrika Mashariki (Global zoomable)
+      this.map = L.map(this.elementId).setView([-6.1659, 39.2026], 6);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap | MAKYAMA TRACKER'
+      }).addTo(this.map);
 
-document.addEventListener("DOMContentLoaded", () => {
-
-    const mapElement = document.getElementById("globalMap");
-
-    if (!mapElement || typeof L === "undefined") {
-        return;
+      this.markersLayer = L.layerGroup().addTo(this.map);
+      this.lineLayer = L.layerGroup().addTo(this.map);
     }
 
-    // WORLD MAP INITIALIZATION
-    const map = L.map("globalMap", {
-        center: [15, 10],
-        zoom: 2,
-        minZoom: 2,
-        maxZoom: 18,
-        worldCopyJump: true
+    setTimeout(() => this.map.invalidateSize(), 200);
+  }
+
+  renderCargoPoints(cargosList) {
+    this.init();
+    if (!this.map) return;
+
+    this.markersLayer.clearLayers();
+    this.lineLayer.clearLayers();
+
+    const allBounds = [];
+
+    cargosList.forEach((cargo) => {
+      const routeCoords = [];
+
+      (cargo.agents || []).forEach((ag) => {
+        const tickLabels = [
+          { key: 'arrived', label: '1. Amefika Eneo' },
+          { key: 'received', label: '2. Amepokea Mzigo' },
+          { key: 'dispatched', label: '3. Ametoa Mzigo' }
+        ];
+
+        tickLabels.forEach((item) => {
+          const t = ag.ticks && ag.ticks[item.key];
+          if (t && t.done && t.lat != null && t.lng != null) {
+            const latlng = [t.lat, t.lng];
+            routeCoords.push(latlng);
+            allBounds.push(latlng);
+
+            const marker = L.marker(latlng).addTo(this.markersLayer);
+            marker.bindPopup(`
+              <div style="color:#0f172a; font-family:sans-serif; min-width:190px;">
+                <strong>📦 ${cargo.cargo_name}</strong><br/>
+                <b>Agent ${ag.step_order}:</b> ${ag.agent_name}<br/>
+                <b>Hatua:</b> ${item.label}<br/>
+                <b>Kituo:</b> ${ag.location_point}<br/>
+                <b>Muda:</b> ${t.time}<br/>
+                <small>GPS: ${t.lat.toFixed(5)}, ${t.lng.toFixed(5)}</small>
+              </div>
+            `);
+          }
+        });
+      });
+
+      if (routeCoords.length > 1) {
+        L.polyline(routeCoords, { color: '#3b82f6', weight: 4, opacity: 0.85 }).addTo(this.lineLayer);
+      }
     });
 
-    // OPENSTREETMAP TILE LAYER
-    L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-            attribution:
-                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-            maxZoom: 19
-        }
-    ).addTo(map);
+    if (allBounds.length > 0) {
+      this.map.fitBounds(allBounds, { padding: [40, 40], maxZoom: 14 });
+    }
+  }
+}
 
-    // MAP LAYERS
-    const cargoMarkers = L.layerGroup().addTo(map);
-    const routeLines = L.layerGroup().addTo(map);
-
-    // PUBLIC API FOR AUTHORIZED DASHBOARD
-    window.MakyamaMap = {
-
-        addCargoLocation: function(location, label, color = "#2589ff") {
-
-            const latitude = Number(location.latitude);
-            const longitude = Number(location.longitude);
-
-            if (
-                !Number.isFinite(latitude) ||
-                !Number.isFinite(longitude) ||
-                latitude < -90 ||
-                latitude > 90 ||
-                longitude < -180 ||
-                longitude > 180
-            ) {
-                return null;
-            }
-
-            const marker = L.circleMarker(
-                [latitude, longitude],
-                {
-                    radius: 8,
-                    color: color,
-                    fillColor: color,
-                    fillOpacity: 0.9,
-                    weight: 2
-                }
-            );
-
-            marker.bindPopup(
-                document.createTextNode(label || "Cargo location")
-            );
-
-            marker.addTo(cargoMarkers);
-
-            return marker;
-        },
-
-        addRoute: function(points) {
-
-            if (!Array.isArray(points) || points.length < 2) {
-                return null;
-            }
-
-            const validPoints = points.filter(point => {
-                const lat = Number(point.latitude);
-                const lng = Number(point.longitude);
-
-                return (
-                    Number.isFinite(lat) &&
-                    Number.isFinite(lng) &&
-                    lat >= -90 &&
-                    lat <= 90 &&
-                    lng >= -180 &&
-                    lng <= 180
-                );
-            }).map(point => [
-                Number(point.latitude),
-                Number(point.longitude)
-            ]);
-
-            if (validPoints.length < 2) {
-                return null;
-            }
-
-            return L.polyline(validPoints, {
-                color: "#2589ff",
-                weight: 3,
-                opacity: 0.8,
-                dashArray: "8, 8"
-            }).addTo(routeLines);
-        },
-
-        clearCargoLocations: function() {
-            cargoMarkers.clearLayers();
-            routeLines.clearLayers();
-        },
-
-        focus: function(latitude, longitude, zoom = 8) {
-            map.setView([latitude, longitude], zoom);
-        }
-
-    };
-
-    // INITIAL WORLD VIEW
-    map.setView([15, 10], 2);
-
-    // FIX MOBILE MAP DISPLAY
-    setTimeout(() => {
-        map.invalidateSize();
-    }, 300);
-
-});
+window.MakyamaGlobalMap = MakyamaGlobalMap;
