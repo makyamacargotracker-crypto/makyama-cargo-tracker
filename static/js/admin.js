@@ -1,347 +1,117 @@
+document.addEventListener('DOMContentLoaded', async () => {
+  // 1. ADMIN LOGIN
+  const loginForm = document.getElementById('adminLoginForm');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('adminUsername').value.trim();
+      const password = document.getElementById('adminPassword').value.trim();
+      const errDiv = document.getElementById('loginError');
 
-"use strict";
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
 
-// =============================================
-// MAKYAMA CARGO TRACKER
-// ADMIN CONTROL CENTER
-// =============================================
+      if (data.success) {
+        window.location.href = data.redirect || '/admin';
+      } else {
+        errDiv.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+      }
+    });
+  }
 
-document.addEventListener("DOMContentLoaded", () => {
+  // 2. ADMIN DASHBOARD DATA
+  const adminList = document.getElementById('adminCargosList');
+  if (adminList) {
+    const adminMap = new MakyamaGlobalMap('adminGlobalMap');
+    let allCargos = [];
 
-    const $ = id => document.getElementById(id);
+    async function fetchAdminCargos() {
+      const res = await fetch('/api/admin/all-cargos');
+      const data = await res.json();
+      if (!data.success) return;
 
-    const loginSection = $("adminLoginSection");
-    const dashboard = $("adminDashboard");
+      allCargos = data.cargos || [];
+      adminMap.renderCargoPoints(allCargos);
 
-    const loginForm = $("adminLoginForm");
-    const loginMessage = $("adminLoginMessage");
-    const adminMessage = $("adminMessage");
-
-    const cargoTable = $("cargoTableBody");
-    const searchInput = $("adminSearch");
-
-    let cargoRecords = [];
-
-    // -----------------------------------------
-    // API REQUEST
-    // -----------------------------------------
-
-    async function api(url, options = {}) {
-
-        const response = await fetch(url, {
-            credentials: "same-origin",
-            ...options,
-            headers: {
-                "Content-Type": "application/json",
-                ...options.headers
-            }
-        });
-
-        const result = await response.json().catch(() => ({}));
-
-        if (!response.ok || result.success === false) {
-            throw new Error(result.message || "Server request failed.");
+      // Takwimu
+      let totalAgents = 0;
+      let completedCargos = 0;
+      allCargos.forEach((c) => {
+        totalAgents += (c.agents || []).length;
+        if (c.agents && c.agents.length > 0 && c.agents.every((a) => a.is_completed)) {
+          completedCargos++;
         }
+      });
 
-        return result;
+      document.getElementById('statTotalCargos').textContent = allCargos.length;
+      document.getElementById('statTotalAgents').textContent = totalAgents;
+      document.getElementById('statCompletedCargos').textContent = completedCargos;
+
+      renderAdminList(allCargos);
     }
 
-    // -----------------------------------------
-    // ADMIN LOGIN
-    // -----------------------------------------
+    function renderAdminList(list) {
+      if (list.length === 0) {
+        adminList.innerHTML = `<p style="color:#94a3b8;">Hakuna mizigo iliyosajiliwa bado.</p>`;
+        return;
+      }
 
-    loginForm.addEventListener("submit", async event => {
+      adminList.innerHTML = list.map((c) => {
+        const agentsRows = (c.agents || []).map((a) => `
+          <tr>
+            <td>#${a.step_order}</td>
+            <td>${a.agent_name}</td>
+            <td>${a.location_point}</td>
+            <td><span class="code-pill">${a.agent_code}</span></td>
+            <td>${a.ticks.arrived.done ? '✅ ' + a.ticks.arrived.time : '⏳'}</td>
+            <td>${a.ticks.received.done ? '✅ ' + a.ticks.received.time : '⏳'}</td>
+            <td>${a.ticks.dispatched.done ? '✅ ' + a.ticks.dispatched.time : '⏳'}</td>
+          </tr>
+        `).join('');
 
-        event.preventDefault();
+        return `
+          <div class="agent-card" style="margin-bottom:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+              <div>
+                <h3>📦 ${c.cargo_name}</h3>
+                <p style="color:#94a3b8; font-size:0.88rem;">
+                  Owner: <strong>${c.owner_name}</strong> | Code ya Owner: <span class="code-pill" style="color:#6ee7b7;">${c.owner_code}</span> |
+                  Njia: ${c.origin} ➔ ${c.destination} (${c.registered_by})
+                </p>
+              </div>
+              <a href="/cargo/${encodeURIComponent(c.cargo_name)}" class="btn btn-outline btn-sm">Fungua Mzigo ➔</a>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Hatua</th>
+                    <th>Agent</th>
+                    <th>Kituo</th>
+                    <th>Code</th>
+                    <th>Amefika</th>
+                    <th>Amepokea</th>
+                    <th>Ametoa</th>
+                  </tr>
+                </thead>
+                <tbody>${agentsRows}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
 
-        const username = $("adminUsername").value.trim();
-        const password = $("adminPassword").value;
-
-        loginMessage.textContent = "Authenticating administrator...";
-
-        try {
-
-            await api("/api/admin/login", {
-                method: "POST",
-                body: JSON.stringify({
-                    username,
-                    password
-                })
-            });
-
-            $("adminPassword").value = "";
-
-            loginSection.classList.add("admin-hidden");
-            dashboard.classList.remove("admin-hidden");
-
-            await loadAdminDashboard();
-
-        } catch (error) {
-            loginMessage.textContent = error.message;
-        }
+    document.getElementById('adminFilterInput')?.addEventListener('input', (e) => {
+      const q = e.target.value.trim().toUpperCase();
+      const filtered = allCargos.filter((c) => c.cargo_name.includes(q) || c.owner_name.toUpperCase().includes(q));
+      renderAdminList(filtered);
     });
 
-    // -----------------------------------------
-    // LOAD STATISTICS
-    // -----------------------------------------
-
-    async function loadStatistics() {
-
-        const result = await api("/api/admin/stats");
-
-        $("totalCargo").textContent = result.total_cargo ?? 0;
-        $("transitCargo").textContent = result.in_transit ?? 0;
-        $("deliveredCargo").textContent = result.delivered ?? 0;
-        $("registeredCargo").textContent = result.registered ?? 0;
-    }
-
-    // -----------------------------------------
-    // LOAD ALL CARGO
-    // -----------------------------------------
-
-    async function loadCargo() {
-
-        cargoTable.replaceChildren();
-
-        const result = await api("/api/admin/cargo");
-
-        cargoRecords = result.cargo || [];
-
-        renderCargo(cargoRecords);
-    }
-
-    // -----------------------------------------
-    // DISPLAY CARGO TABLE
-    // -----------------------------------------
-
-    function renderCargo(records) {
-
-        cargoTable.replaceChildren();
-
-        if (!records.length) {
-
-            const row = document.createElement("tr");
-            const cell = document.createElement("td");
-
-            cell.colSpan = 6;
-            cell.textContent = "No cargo records found.";
-
-            row.appendChild(cell);
-            cargoTable.appendChild(row);
-
-            return;
-        }
-
-        records.forEach(cargo => {
-
-            const row = document.createElement("tr");
-
-            const values = [
-                cargo.cargo_name,
-                cargo.cargo_id,
-                cargo.destination,
-                cargo.status,
-                cargo.agent_count ?? 0
-            ];
-
-            values.forEach(value => {
-
-                const cell = document.createElement("td");
-                cell.textContent = value ?? "N/A";
-
-                row.appendChild(cell);
-            });
-
-            const actions = document.createElement("td");
-
-            const viewButton = document.createElement("button");
-            viewButton.className = "view-btn";
-            viewButton.textContent = "View";
-
-            viewButton.addEventListener("click", () => {
-                viewCargo(cargo.cargo_id);
-            });
-
-            const deleteButton = document.createElement("button");
-            deleteButton.className = "delete-btn";
-            deleteButton.textContent = "Delete";
-
-            deleteButton.style.marginLeft = "7px";
-
-            deleteButton.addEventListener("click", () => {
-                deleteCargo(cargo.cargo_id, cargo.cargo_name);
-            });
-
-            actions.append(viewButton, deleteButton);
-            row.appendChild(actions);
-
-            cargoTable.appendChild(row);
-        });
-    }
-
-    // -----------------------------------------
-    // SEARCH CARGO
-    // -----------------------------------------
-
-    searchInput.addEventListener("input", () => {
-
-        const query = searchInput.value.trim().toLowerCase();
-
-        const filtered = cargoRecords.filter(cargo => {
-
-            const name = String(cargo.cargo_name || "").toLowerCase();
-            const id = String(cargo.cargo_id || "").toLowerCase();
-            const destination = String(cargo.destination || "").toLowerCase();
-
-            return (
-                name.includes(query) ||
-                id.includes(query) ||
-                destination.includes(query)
-            );
-        });
-
-        renderCargo(filtered);
-    });
-
-    // -----------------------------------------
-    // VIEW CARGO DETAILS
-    // -----------------------------------------
-
-    async function viewCargo(cargoId) {
-
-        const panel = $("cargoDetails");
-
-        panel.replaceChildren();
-
-        const loading = document.createElement("p");
-        loading.textContent = "Loading cargo information...";
-
-        panel.appendChild(loading);
-
-        try {
-
-            const result = await api(
-                `/api/admin/cargo/${encodeURIComponent(cargoId)}`
-            );
-
-            const title = document.createElement("h3");
-            title.textContent = result.cargo.cargo_name;
-
-            const details = document.createElement("pre");
-
-            details.textContent = JSON.stringify({
-                cargo_id: result.cargo.cargo_id,
-                owner_name: result.cargo.owner_name,
-                destination: result.cargo.destination,
-                status: result.cargo.status,
-                agents: result.cargo.agents,
-                journey_history: result.history
-            }, null, 2);
-
-            panel.replaceChildren(title, details);
-
-        } catch (error) {
-
-            panel.replaceChildren();
-
-            const message = document.createElement("p");
-            message.textContent = error.message;
-
-            panel.appendChild(message);
-        }
-    }
-
-    // -----------------------------------------
-    // PERMANENT CARGO DELETION
-    // -----------------------------------------
-
-    async function deleteCargo(cargoId, cargoName) {
-
-        const confirmed = confirm(
-            `WARNING: You are about to permanently delete "${cargoName}".\n\n` +
-            "This includes its cargo record, agent records, GPS locations, " +
-            "handover events and journey history.\n\n" +
-            "This action cannot be undone. Continue?"
-        );
-
-        if (!confirmed) return;
-
-        const secondConfirmation = prompt(
-            `Type DELETE to permanently remove ${cargoName}:`
-        );
-
-        if (secondConfirmation !== "DELETE") {
-            adminMessage.textContent = "Deletion cancelled.";
-            return;
-        }
-
-        adminMessage.textContent = "Permanently deleting cargo...";
-
-        try {
-
-            await api(
-                `/api/admin/cargo/${encodeURIComponent(cargoId)}`,
-                {
-                    method: "DELETE",
-                    body: JSON.stringify({
-                        confirmation: "DELETE"
-                    })
-                }
-            );
-
-            adminMessage.textContent =
-                "Cargo and associated records deleted successfully.";
-
-            $("cargoDetails").textContent = "No cargo selected.";
-
-            await loadAdminDashboard();
-
-        } catch (error) {
-
-            adminMessage.textContent = error.message;
-        }
-    }
-
-    // -----------------------------------------
-    // REFRESH
-    // -----------------------------------------
-
-    $("refreshCargo").addEventListener("click", async () => {
-
-        adminMessage.textContent = "Refreshing records...";
-
-        try {
-            await loadAdminDashboard();
-
-            adminMessage.textContent = "Records refreshed.";
-        } catch (error) {
-            adminMessage.textContent = error.message;
-        }
-    });
-
-    // -----------------------------------------
-    // LOGOUT
-    // -----------------------------------------
-
-    $("adminLogout").addEventListener("click", async () => {
-
-        try {
-            await api("/api/admin/logout", {
-                method: "POST"
-            });
-        } finally {
-            window.location.href = "/";
-        }
-    });
-
-    // -----------------------------------------
-    // INITIALIZE
-    // -----------------------------------------
-
-    async function loadAdminDashboard() {
-
-        await loadStatistics();
-        await loadCargo();
-    }
-
+    fetchAdminCargos();
+  }
 });
