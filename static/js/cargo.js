@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   const cargoName = window.CARGO_NAME;
   let currentCode = sessionStorage.getItem(`code_${cargoName}`) || '';
-  let currentState = null;
 
   const globalMap = new MakyamaGlobalMap('globalMap');
 
@@ -13,7 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function showAlert(msg, type = 'success') {
     actionAlert.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
-    setTimeout(() => { actionAlert.innerHTML = ''; }, 6000);
+    setTimeout(() => {
+      actionAlert.innerHTML = '';
+    }, 6000);
   }
 
   async function loadCargoWithCode(code) {
@@ -34,9 +35,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      currentCode = code.toUpperCase();
+      currentCode = code.trim().toUpperCase();
       sessionStorage.setItem(`code_${cargoName}`, currentCode);
-      currentState = data;
 
       unlockSection.style.display = 'none';
       trackingWorkspace.style.display = 'block';
@@ -51,16 +51,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const cargo = data.cargo;
     document.getElementById('cargoTitle').textContent = cargo.cargo_name;
     document.getElementById('roleBadge').textContent = `Nafasi Yako: ${data.role}`;
-    document.getElementById('routeSubtitle').textContent =
-      `Owner: ${cargo.owner_name} | Njia: ${cargo.origin} ➔ ${cargo.destination} | Aliyesajili: ${cargo.registered_by}`;
 
-    // Onyesha panel ya Owner kama ana ruhusa ya kusimamia ma-agent
+    const initialText = cargo.initial_point
+      ? ` | Mwanzo (Initial): ${cargo.initial_point.time} (${Number(cargo.initial_point.lat).toFixed(4)}, ${Number(cargo.initial_point.lng).toFixed(4)})`
+      : ' | Mwanzo (Initial): Unasubiri Agent 1 atie tick';
+
+    document.getElementById('routeSubtitle').textContent =
+      `Owner: ${cargo.owner_name} | Unapoelekea: ${cargo.destination} | Aliyesajili: ${cargo.registered_by}${initialText}`;
+
     document.getElementById('ownerManagePanel').style.display = data.can_manage_agents ? 'block' : 'none';
 
-    // Sasisha Global Map
     globalMap.renderCargoPoints([cargo]);
 
-    // Jenga Timeline ya Ma-Agent
     const timeline = document.getElementById('agentsTimeline');
     timeline.innerHTML = '';
 
@@ -78,10 +80,10 @@ document.addEventListener('DOMContentLoaded', () => {
           adminControlsHtml += `<span class="code-pill">Code: ${ag.agent_code}</span>`;
         }
         if (data.can_reset_codes) {
-          adminControlsHtml += `<button type="button" class="btn btn-warning btn-sm btn-reset-code" data-id="${ag.id}">🔄 Code Mpya</button>`;
+          adminControlsHtml += `<button type="button" class="btn btn-warning btn-sm btn-reset-code" data-id="${ag.id}">🔄 Renew Code</button>`;
         }
         if (data.can_manage_agents) {
-          adminControlsHtml += `<button type="button" class="btn btn-outline btn-sm btn-edit-agent" data-id="${ag.id}" data-name="${ag.agent_name}" data-loc="${ag.location_point}">✏️ Badili</button>`;
+          adminControlsHtml += `<button type="button" class="btn btn-outline btn-sm btn-edit-agent" data-id="${ag.id}" data-name="${ag.agent_name}">✏️ Badili Jina</button>`;
           adminControlsHtml += `<button type="button" class="btn btn-danger btn-sm btn-del-agent" data-id="${ag.id}">🗑️ Futa</button>`;
         }
         adminControlsHtml += `</div>`;
@@ -100,7 +102,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
           <div>
             <h3>Hatua #${ag.step_order}: ${ag.agent_name}</h3>
-            <p style="color:#94a3b8; font-size:0.9rem;">📍 Kituo: <strong>${ag.location_point}</strong></p>
             ${adminControlsHtml}
           </div>
           <span class="badge-pill" style="margin:0; ${ag.is_completed ? 'border-color:#10b981; color:#6ee7b7;' : ''}">
@@ -141,7 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="tick-box">
         <div>
           <strong>⬜ ${title}</strong>
-          <p style="font-size:0.82rem; color:#94a3b8; margin-top:4px;">Bonyeza kuthibitisha location na muda.</p>
+          <p style="font-size:0.82rem; color:#94a3b8; margin-top:4px;">GPS itasoma location yako kiotomatiki.</p>
         </div>
         <button type="button" class="btn btn-primary btn-sm btn-do-tick" data-tick="${type}" ${disabled}>
           ✔️ Tia Tick Sasa
@@ -151,7 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function bindTimelineEvents() {
-    // 1. Vitufe vya kutia tick (GPS + Time)
     document.querySelectorAll('.btn-do-tick').forEach((btn) => {
       btn.addEventListener('click', () => {
         const tickType = btn.getAttribute('data-tick');
@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         btn.disabled = true;
-        btn.textContent = '📡 Inachukua GPS...';
+        btn.textContent = '📡 Inasoma GPS...';
 
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
@@ -188,6 +188,8 @@ document.addEventListener('DOMContentLoaded', () => {
               loadCargoWithCode(currentCode);
             } catch (e) {
               showAlert('Hitilafu ya kutuma tick.', 'danger');
+              btn.disabled = false;
+              btn.textContent = '✔️ Tia Tick Sasa';
             }
           },
           () => {
@@ -200,11 +202,10 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // 2. Kuomba code mpya ya agent
     document.querySelectorAll('.btn-reset-code').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const agentId = btn.getAttribute('data-id');
-        if (!confirm('Una uhakika unataka kubadilisha code ya agent huyu? Code ya zamani haitafanya kazi tena.')) return;
+        if (!confirm('Una uhakika unataka ku-renew code ya agent huyu? Code ya zamani haitafanya kazi tena.')) return;
 
         const res = await fetch('/api/reset-code', {
           method: 'POST',
@@ -217,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const data = await res.json();
         if (data.success) {
-          showAlert(`🔑 Code mpya imetolewa: ${data.new_code}`, 'success');
+          showAlert(`🔑 Code mpya ya ${data.agent_name || 'Agent'} imetolewa: ${data.new_code}`, 'success');
           loadCargoWithCode(currentCode);
         } else {
           showAlert(data.message, 'danger');
@@ -225,16 +226,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // 3. Owner kubadili taarifa za agent
     document.querySelectorAll('.btn-edit-agent').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const agentId = btn.getAttribute('data-id');
         const oldName = btn.getAttribute('data-name');
-        const oldLoc = btn.getAttribute('data-loc');
         const newName = prompt('Ingiza jina jipya la Agent:', oldName);
         if (!newName) return;
-        const newLoc = prompt('Ingiza kituo kipya cha Agent:', oldLoc);
-        if (!newLoc) return;
 
         const res = await fetch('/api/manage-agent', {
           method: 'POST',
@@ -244,13 +241,12 @@ document.addEventListener('DOMContentLoaded', () => {
             owner_code: currentCode,
             action: 'EDIT',
             agent_id: agentId,
-            agent_name: newName,
-            location_point: newLoc
+            agent_name: newName
           })
         });
         const data = await res.json();
         if (data.success) {
-          showAlert('✅ Taarifa za Agent zimebadilishwa.', 'success');
+          showAlert('✅ Jina la Agent limebadilishwa.', 'success');
           loadCargoWithCode(currentCode);
         } else {
           showAlert(data.message, 'danger');
@@ -258,7 +254,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // 4. Owner kufuta agent
     document.querySelectorAll('.btn-del-agent').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const agentId = btn.getAttribute('data-id');
@@ -285,13 +280,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Owner kuongeza agent mpya
   const addNewAgentForm = document.getElementById('addNewAgentForm');
   if (addNewAgentForm) {
     addNewAgentForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const agentName = document.getElementById('newAgentName').value.trim();
-      const locationPoint = document.getElementById('newAgentLocation').value.trim();
 
       const res = await fetch('/api/manage-agent', {
         method: 'POST',
@@ -300,8 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
           cargo_name: cargoName,
           owner_code: currentCode,
           action: 'ADD',
-          agent_name: agentName,
-          location_point: locationPoint
+          agent_name: agentName
         })
       });
       const data = await res.json();
@@ -315,7 +307,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Unlock Form Submit
   if (unlockForm) {
     unlockForm.addEventListener('submit', (e) => {
       e.preventDefault();
