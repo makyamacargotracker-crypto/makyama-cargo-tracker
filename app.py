@@ -50,15 +50,13 @@ def generate_code(prefix):
 
 def empty_ticks():
     return {
-        "arrived": {"done": False, "time": None, "lat": None, "lng": None},
-        "received": {"done": False, "time": None, "lat": None, "lng": None},
-        "dispatched": {"done": False, "time": None, "lat": None, "lng": None},
+        "received": {"done": False, "time": None, "place": None},
+        "dispatched": {"done": False, "time": None, "place": None},
     }
 
 def agent_completed(ag):
     ticks = ag.get('ticks') or {}
     return (
-        bool((ticks.get('arrived') or {}).get('done')) and
         bool((ticks.get('received') or {}).get('done')) and
         bool((ticks.get('dispatched') or {}).get('done'))
     )
@@ -71,9 +69,8 @@ def serialize_agent(ag, include_code=True):
         "agent_name": ag.get("agent_name"),
         "is_completed": agent_completed(ag),
         "ticks": {
-            "arrived": ticks.get("arrived") or {"done": False, "time": None, "lat": None, "lng": None},
-            "received": ticks.get("received") or {"done": False, "time": None, "lat": None, "lng": None},
-            "dispatched": ticks.get("dispatched") or {"done": False, "time": None, "lat": None, "lng": None},
+            "received": ticks.get("received") or {"done": False, "time": None, "place": None},
+            "dispatched": ticks.get("dispatched") or {"done": False, "time": None, "place": None},
         }
     }
     if include_code:
@@ -247,7 +244,7 @@ def api_register():
         "agents": generated_agents
     })
 
-# 2. Tafuta Mzigo kwa Jina au Code (Owner / Agent)
+# 2. Tafuta Mzigo kwa Jina au Code
 @app.route('/api/search', methods=['GET'])
 def api_search():
     query = (request.args.get('q') or '').strip().upper()
@@ -275,7 +272,7 @@ def api_search():
         "matched_role": matched_role
     })
 
-# 3. Fungua Mzigo kwa Code (Access Control)
+# 3. Fungua Mzigo kwa Code
 @app.route('/api/access', methods=['POST'])
 def api_access():
     data = request.get_json() or {}
@@ -343,24 +340,17 @@ def api_access():
         }
     })
 
-# 4. Kutia Tick (GPS Inasoma Kiotomatiki + Muda + Initial Point kwa Agent 1)
+# 4. Kutia Tick (Kwa Jina la Eneo mfano: Pangani Tanga + Muda + Initial Point kwa Agent 1)
 @app.route('/api/tick', methods=['POST'])
 def api_tick():
     data = request.get_json() or {}
     cargo_name = (data.get('cargo_name') or '').strip().upper()
     code = (data.get('code') or '').strip().upper()
-    tick_type = (data.get('tick_type') or '').strip()
-    lat = data.get('lat')
-    lng = data.get('lng')
+    tick_type = (data.get('tick_type') or '').strip()  # 'received' au 'dispatched'
+    place = (data.get('place') or '').strip()
 
-    if lat is None or lng is None:
-        return jsonify({"success": False, "message": "Lazima uwashe GPS Location ya simu yako ili mfumo usome eneo kiotomatiki!"}), 400
-
-    try:
-        lat_val = float(lat)
-        lng_val = float(lng)
-    except (TypeError, ValueError):
-        return jsonify({"success": False, "message": "Coordinates za GPS sio sahihi."}), 400
+    if not place:
+        return jsonify({"success": False, "message": "Tafadhali andika jina la eneo (mf. Pangani Tanga)."}), 400
 
     cargo = get_cargo_by_name(cargo_name)
     if not cargo:
@@ -385,16 +375,12 @@ def api_tick():
     ticks = dict(agent.get("ticks") or empty_ticks())
     now_str = get_eat_now()
 
-    if tick_type == 'arrived':
-        ticks['arrived'] = {"done": True, "time": now_str, "lat": lat_val, "lng": lng_val}
-    elif tick_type == 'received':
-        if not (ticks.get('arrived') or {}).get('done'):
-            return jsonify({"success": False, "message": "Tia tick ya 'Nimefika Eneo' kwanza!"}), 400
-        ticks['received'] = {"done": True, "time": now_str, "lat": lat_val, "lng": lng_val}
+    if tick_type == 'received':
+        ticks['received'] = {"done": True, "time": now_str, "place": place}
     elif tick_type == 'dispatched':
         if not (ticks.get('received') or {}).get('done'):
             return jsonify({"success": False, "message": "Tia tick ya 'Nimepokea Mzigo' kwanza!"}), 400
-        ticks['dispatched'] = {"done": True, "time": now_str, "lat": lat_val, "lng": lng_val}
+        ticks['dispatched'] = {"done": True, "time": now_str, "place": place}
     else:
         return jsonify({"success": False, "message": "Aina ya tick haipo."}), 400
 
@@ -404,15 +390,15 @@ def api_tick():
     cargo_ref = shipments_ref.child(cargo["id"])
     cargo_ref.child("agents").set(agents)
 
+    # Agent 1 anapoanza kusafirisha mzigo (akitia tick ya mwanzo) ndipo initial_point inahifadhiwa
     if step == 1 and not cargo.get("initial_point"):
         cargo_ref.child("initial_point").set({
-            "lat": lat_val,
-            "lng": lng_val,
+            "place": place,
             "time": now_str,
             "agent_name": agent.get("agent_name")
         })
 
-    return jsonify({"success": True, "message": "Tick na GPS location vimerekodiwa kiotomatiki!", "time": now_str})
+    return jsonify({"success": True, "message": f"Tick imerekodiwa ({place})!", "time": now_str})
 
 # 5. Ku-renew Code ya Agent (Owner na Agent 1 kama alisajili)
 @app.route('/api/reset-code', methods=['POST'])
@@ -450,7 +436,7 @@ def api_reset_code():
     shipments_ref.child(cargo["id"]).child("agents").set(agents)
     return jsonify({"success": True, "new_code": new_code, "agent_name": target_agent.get("agent_name")})
 
-# 6. Owner Kuongeza, Kubadili au Kufuta Agent (Jina tu)
+# 6. Owner Kuongeza, Kubadili au Kufuta Agent
 @app.route('/api/manage-agent', methods=['POST'])
 def api_manage_agent():
     data = request.get_json() or {}
