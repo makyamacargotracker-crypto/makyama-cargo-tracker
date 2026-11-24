@@ -149,7 +149,7 @@ body {
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
-  padding: 28px 20px 80px;
+  padding: 28px 20px 60px;
   flex: 1;
 }
 
@@ -310,7 +310,7 @@ body {
   letter-spacing: 0.04em;
 }
 
-/* Alerts & Toast */
+/* Alerts */
 .alert {
   padding: 13px 16px;
   border-radius: 12px;
@@ -327,31 +327,33 @@ table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border-color); }
 th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
 
-/* Floating WhatsApp Customer Care */
-.whatsapp-float {
-  position: fixed;
-  bottom: 22px;
-  right: 22px;
-  z-index: 2000;
-  background: var(--whatsapp);
-  color: #052e16;
-  font-weight: 700;
-  padding: 12px 18px;
-  border-radius: 999px;
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  box-shadow: 0 10px 30px rgba(37, 211, 102, 0.4);
-  transition: transform 0.2s ease;
-}
-.whatsapp-float:hover { transform: scale(1.05); }
-
+/* Footer & WhatsApp Icon */
 footer {
   border-top: 1px solid var(--border-color);
-  padding: 20px;
+  padding: 24px 20px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 0.86rem;
+  font-size: 0.88rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
 }
-footer a { color: var(--whatsapp); text-decoration: none; font-weight: 600; }
+
+.whatsapp-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--whatsapp);
+  color: #052e16;
+  text-decoration: none;
+  box-shadow: 0 6px 18px rgba(37, 211, 102, 0.3);
+  transition: transform 0.2s ease;
+}
+
+.whatsapp-footer-btn:hover {
+  transform: scale(1.08);
+}
