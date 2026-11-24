@@ -69,7 +69,6 @@ def serialize_agent(ag, include_code=True):
         "id": ag.get("id"),
         "step_order": ag.get("step_order"),
         "agent_name": ag.get("agent_name"),
-        "location_point": ag.get("location_point"),
         "is_completed": agent_completed(ag),
         "ticks": {
             "arrived": ticks.get("arrived") or {"done": False, "time": None, "lat": None, "lng": None},
@@ -113,6 +112,27 @@ def get_cargo_by_name(cargo_name):
         if (item.get("cargo_name") or "").strip().upper() == clean_name:
             return item
     return None
+
+def find_cargo_by_name_or_code(query):
+    clean_q = (query or "").strip().upper()
+    if not clean_q:
+        return None, None
+
+    for item in get_all_shipments():
+        cargo_name = (item.get("cargo_name") or "").strip().upper()
+        owner_code = (item.get("owner_code") or "").strip().upper()
+
+        if cargo_name == clean_q:
+            return item, None
+        if owner_code == clean_q:
+            return item, clean_q
+
+        for ag in item.get("agents", []):
+            ag_code = (ag.get("agent_code") or "").strip().upper()
+            if ag_code == clean_q:
+                return item, clean_q
+
+    return None, None
 
 # ================= ADMIN AUTH DECORATOR =================
 def admin_required(f):
@@ -169,7 +189,6 @@ def admin_page():
 def api_register():
     data = request.get_json() or {}
     cargo_name = (data.get('cargo_name') or '').strip().upper()
-    origin = (data.get('origin') or '').strip()
     destination = (data.get('destination') or '').strip()
     registered_by = (data.get('registered_by') or 'OWNER').strip().upper()
     owner_name = (data.get('owner_name') or '').strip()
@@ -178,11 +197,11 @@ def api_register():
     if registered_by not in ('OWNER', 'AGENT_1'):
         registered_by = 'OWNER'
 
-    if not cargo_name or not origin or not destination or not owner_name or not agents_list:
-        return jsonify({"success": False, "message": "Tafadhali jaza taarifa zote na angalau agent mmoja."}), 400
+    if not cargo_name or not destination or not owner_name or not agents_list:
+        return jsonify({"success": False, "message": "Jaza jina la mzigo, unapoelekea, jina la owner, na angalau agent mmoja."}), 400
 
     if get_cargo_by_name(cargo_name):
-        return jsonify({"success": False, "message": "Jina hili la mzigo limeshatumika. Chagua jina lingine."}), 400
+        return jsonify({"success": False, "message": "Jina hili la mzigo limeshatumika. Chagua jingine."}), 400
 
     owner_code = generate_code("OWN")
     agents_docs = []
@@ -190,9 +209,8 @@ def api_register():
 
     for idx, ag in enumerate(agents_list, start=1):
         ag_name = (ag.get('name') or '').strip()
-        ag_loc = (ag.get('location') or '').strip()
-        if not ag_name or not ag_loc:
-            return jsonify({"success": False, "message": f"Kamilisha jina na kituo cha Agent {idx}."}), 400
+        if not ag_name:
+            return jsonify({"success": False, "message": f"Jaza jina la Agent {idx}."}), 400
 
         ag_code = generate_code(f"AGT{idx}")
         ag_id = f"ag_{idx}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=6))}"
@@ -201,22 +219,20 @@ def api_register():
             "id": ag_id,
             "step_order": idx,
             "agent_name": ag_name,
-            "location_point": ag_loc,
             "agent_code": ag_code,
             "ticks": empty_ticks()
         })
         generated_agents.append({
             "step": idx,
             "name": ag_name,
-            "location": ag_loc,
             "code": ag_code
         })
 
     new_ref = shipments_ref.push()
     new_ref.set({
         "cargo_name": cargo_name,
-        "origin": origin,
         "destination": destination,
+        "initial_point": None,
         "registered_by": registered_by,
         "owner_name": owner_name,
         "owner_code": owner_code,
@@ -231,19 +247,32 @@ def api_register():
         "agents": generated_agents
     })
 
-# 2. Tafuta Mzigo kwa Jina (Search)
+# 2. Tafuta Mzigo kwa Jina au Code (Owner / Agent)
 @app.route('/api/search', methods=['GET'])
 def api_search():
     query = (request.args.get('q') or '').strip().upper()
-    cargo = get_cargo_by_name(query)
+    cargo, matched_code = find_cargo_by_name_or_code(query)
     if not cargo:
-        return jsonify({"success": False, "message": "Mzigo haujapatikana. Hakikisha umeandika jina sahihi."}), 404
+        return jsonify({"success": False, "message": "Mzigo haujapatikana kwa jina au code uliyoingiza."}), 404
+
+    matched_role = None
+    if matched_code:
+        if matched_code == (cargo.get("owner_code") or "").upper():
+            matched_role = "OWNER"
+        else:
+            for ag in cargo.get("agents", []):
+                if (ag.get("agent_code") or "").upper() == matched_code:
+                    matched_role = f"AGENT_{ag.get('step_order')} ({ag.get('agent_name')})"
+                    break
+
     return jsonify({
         "success": True,
         "cargo_name": cargo["cargo_name"],
-        "origin": cargo.get("origin", ""),
         "destination": cargo.get("destination", ""),
-        "created_at": cargo.get("created_at", "")
+        "initial_point": cargo.get("initial_point"),
+        "created_at": cargo.get("created_at", ""),
+        "matched_code": matched_code,
+        "matched_role": matched_role
     })
 
 # 3. Fungua Mzigo kwa Code (Access Control)
@@ -259,7 +288,6 @@ def api_access():
 
     agents = cargo["agents"]
 
-    # Kama ni Owner
     if code == (cargo.get("owner_code") or "").upper():
         return jsonify({
             "success": True,
@@ -269,8 +297,8 @@ def api_access():
             "can_reset_codes": True,
             "cargo": {
                 "cargo_name": cargo["cargo_name"],
-                "origin": cargo.get("origin", ""),
                 "destination": cargo.get("destination", ""),
+                "initial_point": cargo.get("initial_point"),
                 "registered_by": cargo.get("registered_by", "OWNER"),
                 "owner_name": cargo.get("owner_name", ""),
                 "created_at": cargo.get("created_at", ""),
@@ -278,7 +306,6 @@ def api_access():
             }
         })
 
-    # Kama ni Agent
     target_agent = next((a for a in agents if (a.get("agent_code") or "").upper() == code), None)
     if not target_agent:
         return jsonify({"success": False, "message": "Code uliyoingiza sio sahihi kwa mzigo huu!"}), 403
@@ -307,8 +334,8 @@ def api_access():
         "prev_agent_completed": prev_completed,
         "cargo": {
             "cargo_name": cargo["cargo_name"],
-            "origin": cargo.get("origin", ""),
             "destination": cargo.get("destination", ""),
+            "initial_point": cargo.get("initial_point"),
             "registered_by": cargo.get("registered_by", "OWNER"),
             "owner_name": cargo.get("owner_name", ""),
             "created_at": cargo.get("created_at", ""),
@@ -316,7 +343,7 @@ def api_access():
         }
     })
 
-# 4. Kutia Tick (Na GPS + Muda)
+# 4. Kutia Tick (GPS Inasoma Kiotomatiki + Muda + Initial Point kwa Agent 1)
 @app.route('/api/tick', methods=['POST'])
 def api_tick():
     data = request.get_json() or {}
@@ -327,7 +354,7 @@ def api_tick():
     lng = data.get('lng')
 
     if lat is None or lng is None:
-        return jsonify({"success": False, "message": "Lazima uwashe GPS Location ya simu yako kabla ya kutia tick!"}), 400
+        return jsonify({"success": False, "message": "Lazima uwashe GPS Location ya simu yako ili mfumo usome eneo kiotomatiki!"}), 400
 
     try:
         lat_val = float(lat)
@@ -373,11 +400,21 @@ def api_tick():
 
     agent['ticks'] = ticks
     agents[agent_idx] = agent
-    shipments_ref.child(cargo["id"]).child("agents").set(agents)
 
-    return jsonify({"success": True, "message": "Tick imerekodiwa kikamilifu!", "time": now_str})
+    cargo_ref = shipments_ref.child(cargo["id"])
+    cargo_ref.child("agents").set(agents)
 
-# 5. Kuomba Code Mpya ya Agent
+    if step == 1 and not cargo.get("initial_point"):
+        cargo_ref.child("initial_point").set({
+            "lat": lat_val,
+            "lng": lng_val,
+            "time": now_str,
+            "agent_name": agent.get("agent_name")
+        })
+
+    return jsonify({"success": True, "message": "Tick na GPS location vimerekodiwa kiotomatiki!", "time": now_str})
+
+# 5. Ku-renew Code ya Agent (Owner na Agent 1 kama alisajili)
 @app.route('/api/reset-code', methods=['POST'])
 def api_reset_code():
     data = request.get_json() or {}
@@ -403,7 +440,7 @@ def api_reset_code():
     )
 
     if not (is_owner or is_agent_1_creator):
-        return jsonify({"success": False, "message": "Huna ruhusa ya kubadilisha code ya agent."}), 403
+        return jsonify({"success": False, "message": "Ni Owner au Agent 1 (aliyesajili) pekee mwenye ruhusa ya ku-renew code."}), 403
 
     target_agent = agents[target_idx]
     new_code = generate_code(f"AGT{target_agent.get('step_order')}")
@@ -411,9 +448,9 @@ def api_reset_code():
     agents[target_idx] = target_agent
 
     shipments_ref.child(cargo["id"]).child("agents").set(agents)
-    return jsonify({"success": True, "new_code": new_code})
+    return jsonify({"success": True, "new_code": new_code, "agent_name": target_agent.get("agent_name")})
 
-# 6. Owner Kuongeza, Kubadili au Kufuta Agent
+# 6. Owner Kuongeza, Kubadili au Kufuta Agent (Jina tu)
 @app.route('/api/manage-agent', methods=['POST'])
 def api_manage_agent():
     data = request.get_json() or {}
@@ -429,9 +466,8 @@ def api_manage_agent():
 
     if action == 'ADD':
         ag_name = (data.get('agent_name') or '').strip()
-        ag_loc = (data.get('location_point') or '').strip()
-        if not ag_name or not ag_loc:
-            return jsonify({"success": False, "message": "Jaza jina na kituo cha agent mpya."}), 400
+        if not ag_name:
+            return jsonify({"success": False, "message": "Jaza jina la agent mpya."}), 400
 
         next_step = len(agents) + 1
         new_code = generate_code(f"AGT{next_step}")
@@ -440,7 +476,6 @@ def api_manage_agent():
             "id": ag_id,
             "step_order": next_step,
             "agent_name": ag_name,
-            "location_point": ag_loc,
             "agent_code": new_code,
             "ticks": empty_ticks()
         })
@@ -453,8 +488,6 @@ def api_manage_agent():
             if ag.get("id") == ag_id:
                 if data.get('agent_name'):
                     ag["agent_name"] = data.get('agent_name').strip()
-                if data.get('location_point'):
-                    ag["location_point"] = data.get('location_point').strip()
                 shipments_ref.child(cargo["id"]).child("agents").set(agents)
                 return jsonify({"success": True})
 
@@ -479,8 +512,8 @@ def api_admin_all():
         result.append({
             "id": c.get("id"),
             "cargo_name": c.get("cargo_name"),
-            "origin": c.get("origin", ""),
             "destination": c.get("destination", ""),
+            "initial_point": c.get("initial_point"),
             "registered_by": c.get("registered_by", "OWNER"),
             "owner_name": c.get("owner_name", ""),
             "owner_code": c.get("owner_code", ""),
@@ -488,6 +521,16 @@ def api_admin_all():
             "agents": [serialize_agent(a, include_code=True) for a in c.get("agents", [])]
         })
     return jsonify({"success": True, "cargos": result})
+
+# 8. Admin Kufuta Mzigo
+@app.route('/api/admin/delete-cargo/<cargo_id>', methods=['DELETE'])
+@admin_required
+def api_admin_delete_cargo(cargo_id):
+    cargo_ref = shipments_ref.child(cargo_id)
+    if not cargo_ref.get():
+        return jsonify({"success": False, "message": "Mzigo haupo au umeshafutwa."}), 404
+    cargo_ref.delete()
+    return jsonify({"success": True, "message": "Mzigo umefutwa kikamilifu."})
 
 if __name__ == '__main__':
     app.run(debug=True)
