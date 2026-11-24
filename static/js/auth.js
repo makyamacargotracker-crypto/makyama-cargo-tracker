@@ -1,15 +1,11 @@
 
 "use strict";
 
-// ==========================================
-// MAKYAMA CARGO TRACKER - AUTHENTICATION
-// ==========================================
-
 document.addEventListener("DOMContentLoaded", () => {
 
-    // --------------------------------------
-    // USER LOGIN
-    // --------------------------------------
+    // =====================================
+    // LOGIN
+    // =====================================
 
     const loginForm = document.getElementById("loginForm");
 
@@ -18,24 +14,30 @@ document.addEventListener("DOMContentLoaded", () => {
             event.preventDefault();
 
             const message = document.getElementById("loginMessage");
+            const button = document.getElementById("loginButton");
+
+            const cargoId = document.getElementById("cargoId").value.trim();
             const code = document.getElementById("accessCode").value.trim();
 
-            message.textContent = "Verifying your access code...";
+            if (!cargoId || !code) {
+                message.textContent = "Cargo ID and Access Code are required.";
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = "Verifying...";
+
+            message.textContent = "Checking your credentials...";
 
             try {
-                // The current backend requires both cargo ID and code.
-                const cargoId = prompt("Enter your Cargo ID:");
-
-                if (!cargoId || !cargoId.trim()) {
-                    message.textContent = "Cargo ID is required.";
-                    return;
-                }
-
                 const response = await fetch("/api/cargo/access", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
                     body: JSON.stringify({
-                        cargo_id: cargoId.trim(),
+                        cargo_id: cargoId,
                         code: code
                     })
                 });
@@ -46,17 +48,24 @@ document.addEventListener("DOMContentLoaded", () => {
                     throw new Error(result.message || "Login failed.");
                 }
 
+                message.style.color = "#38d996";
+                message.textContent = "Login successful. Redirecting...";
+
                 window.location.href = "/dashboard";
 
             } catch (error) {
+                message.style.color = "#ff9b9b";
                 message.textContent = error.message;
+
+                button.disabled = false;
+                button.textContent = "Continue Securely";
             }
         });
     }
 
-    // --------------------------------------
+    // =====================================
     // CARGO REGISTRATION
-    // --------------------------------------
+    // =====================================
 
     const registerForm = document.getElementById("registerForm");
 
@@ -65,9 +74,7 @@ document.addEventListener("DOMContentLoaded", () => {
             event.preventDefault();
 
             const message = document.getElementById("registerMessage");
-            const submitButton = registerForm.querySelector(
-                'button[type="submit"]'
-            );
+            const button = registerForm.querySelector('button[type="submit"]');
 
             const agentInputs = document.querySelectorAll(".agent-name");
 
@@ -85,10 +92,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 agents: agents
             };
 
-            if (!payload.cargo_name ||
+            if (
+                !payload.cargo_name ||
                 !payload.owner_name ||
                 !payload.destination ||
-                !payload.registrar_name) {
+                !payload.registrar_name
+            ) {
                 message.textContent = "Please complete all required fields.";
                 return;
             }
@@ -98,14 +107,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            submitButton.disabled = true;
-            submitButton.textContent = "Registering Cargo...";
+            button.disabled = true;
+            button.textContent = "Registering Cargo...";
             message.textContent = "Please wait...";
 
             try {
                 const response = await fetch("/api/cargo/register", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
                     body: JSON.stringify(payload)
                 });
 
@@ -115,7 +127,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     throw new Error(result.message || "Registration failed.");
                 }
 
-                // Hide the form and show the newly issued credentials.
                 registerForm.replaceChildren();
 
                 const heading = document.createElement("h2");
@@ -191,8 +202,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
             } catch (error) {
                 message.textContent = error.message;
-                submitButton.disabled = false;
-                submitButton.textContent = "Register Cargo";
+                button.disabled = false;
+                button.textContent = "Register Cargo";
             }
         });
     }
