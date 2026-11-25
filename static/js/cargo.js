@@ -17,21 +17,49 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 6000);
   }
 
-  function formatFullLocationInput(rawValue) {
-    const clean = (rawValue || '').trim().replace(/\s+/g, ' ');
-    if (!clean) return '';
-    const words = clean.split(' ').map((w) => {
-      if (w.includes(',')) {
-        return w.split(',').map((p) => p ? p.charAt(0).toUpperCase() + p.slice(1) : '').join(',');
+  // Inabadilisha GPS (lat, lng) kuwa jina kamili la eneo kiotomatiki (mf. Kinuni, Zanzibar, Tanzania)
+  async function getFullPlaceFromGPS(lat, lng) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&zoom=16&addressdetails=1`;
+      const res = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Language': 'sw,en'
+        }
+      });
+      const data = await res.json();
+      if (data && data.address) {
+        const addr = data.address;
+        const area =
+          addr.suburb ||
+          addr.neighbourhood ||
+          addr.quarter ||
+          addr.village ||
+          addr.town ||
+          addr.city_district ||
+          addr.road ||
+          '';
+        const cityOrRegion =
+          addr.city ||
+          addr.state ||
+          addr.region ||
+          addr.county ||
+          '';
+        const country = addr.country || '';
+
+        const parts = [area, cityOrRegion, country].filter((p, idx, arr) => p && arr.indexOf(p) === idx);
+        if (parts.length > 0) {
+          return parts.join(', ');
+        }
       }
-      return w.charAt(0).toUpperCase() + w.slice(1);
-    });
-    const formatted = words.join(' ');
-    const lower = formatted.toLowerCase();
-    if (!lower.includes('tanzania') && !lower.includes('zanzibar')) {
-      return `${formatted}, Zanzibar, Tanzania`;
+      if (data && data.display_name) {
+        const cleanParts = data.display_name.split(',').map((s) => s.trim()).filter(Boolean);
+        return cleanParts.slice(0, 3).join(', ');
+      }
+    } catch (err) {
+      // Fallback ikiwa reverse geocoding itachelewa
     }
-    return formatted;
+    return 'Eneo limethibitishwa kwa GPS';
   }
 
   async function loadCargoWithCode(code) {
@@ -157,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="tick-box">
         <div>
           <strong>⬜ ${title}</strong>
-          <p style="font-size:0.82rem; color:#94a3b8; margin-top:4px;">Andika eneo kamili (mf. Kinuni, Zanzibar, Tanzania).</p>
+          <p style="font-size:0.82rem; color:#94a3b8; margin-top:4px;">Bonyeza tick — GPS itasoma eneo lako kiotomatiki.</p>
         </div>
         <button type="button" class="btn btn-primary btn-sm btn-do-tick" data-tick="${type}" ${disabled}>
           ✔️ Tia Tick Sasa
@@ -168,44 +196,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function bindTimelineEvents() {
     document.querySelectorAll('.btn-do-tick').forEach((btn) => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
         const tickType = btn.getAttribute('data-tick');
-        const rawPlace = prompt('Andika eneo kamili (mf. Kinuni, Zanzibar, Tanzania):');
-        if (!rawPlace || !rawPlace.trim()) {
-          showAlert('Lazima uandike jina la eneo ili kutia tick.', 'danger');
+        if (!navigator.geolocation) {
+          showAlert('Simu au Browser yako haisupport GPS Location!', 'danger');
           return;
         }
 
-        const fullPlace = formatFullLocationInput(rawPlace);
-
         btn.disabled = true;
-        btn.textContent = 'Inahifadhi...';
+        btn.textContent = '📡 Inasoma Eneo...';
 
-        try {
-          const res = await fetch('/api/tick', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              cargo_name: cargoName,
-              code: currentCode,
-              tick_type: tickType,
-              place: fullPlace
-            })
-          });
-          const data = await res.json();
-          if (!data.success) {
-            showAlert(data.message, 'danger');
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const lat = pos.coords.latitude;
+              const lng = pos.coords.longitude;
+              const fullPlace = await getFullPlaceFromGPS(lat, lng);
+
+              const res = await fetch('/api/tick', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  cargo_name: cargoName,
+                  code: currentCode,
+                  tick_type: tickType,
+                  place: fullPlace,
+                  lat: lat,
+                  lng: lng
+                })
+              });
+              const data = await res.json();
+              if (!data.success) {
+                showAlert(data.message, 'danger');
+                btn.disabled = false;
+                btn.textContent = '✔️ Tia Tick Sasa';
+                return;
+              }
+              showAlert(`✅ ${data.message} (${data.time})`, 'success');
+              loadCargoWithCode(currentCode);
+            } catch (e) {
+              showAlert('Hitilafu ya kutuma tick.', 'danger');
+              btn.disabled = false;
+              btn.textContent = '✔️ Tia Tick Sasa';
+            }
+          },
+          () => {
+            showAlert('⚠️ Lazima uwashe GPS Location ya simu na uruhusu browser kuitumia!', 'danger');
             btn.disabled = false;
             btn.textContent = '✔️ Tia Tick Sasa';
-            return;
-          }
-          showAlert(`✅ ${data.message} (${data.time})`, 'success');
-          loadCargoWithCode(currentCode);
-        } catch (e) {
-          showAlert('Hitilafu ya kutuma tick.', 'danger');
-          btn.disabled = false;
-          btn.textContent = '✔️ Tia Tick Sasa';
-        }
+          },
+          { enableHighAccuracy: true, timeout: 15000 }
+        );
       });
     });
 
