@@ -50,8 +50,8 @@ def generate_code(prefix):
 
 def empty_ticks():
     return {
-        "received": {"done": False, "time": None, "place": None},
-        "dispatched": {"done": False, "time": None, "place": None},
+        "received": {"done": False, "time": None, "place": None, "lat": None, "lng": None},
+        "dispatched": {"done": False, "time": None, "place": None, "lat": None, "lng": None},
     }
 
 def agent_completed(ag):
@@ -69,8 +69,8 @@ def serialize_agent(ag, include_code=True):
         "agent_name": ag.get("agent_name"),
         "is_completed": agent_completed(ag),
         "ticks": {
-            "received": ticks.get("received") or {"done": False, "time": None, "place": None},
-            "dispatched": ticks.get("dispatched") or {"done": False, "time": None, "place": None},
+            "received": ticks.get("received") or {"done": False, "time": None, "place": None, "lat": None, "lng": None},
+            "dispatched": ticks.get("dispatched") or {"done": False, "time": None, "place": None, "lat": None, "lng": None},
         }
     }
     if include_code:
@@ -340,17 +340,28 @@ def api_access():
         }
     })
 
-# 4. Kutia Tick (Kwa Jina la Eneo mfano: Pangani Tanga + Muda + Initial Point kwa Agent 1)
+# 4. Kutia Tick (GPS Inasoma Eneo Kiotomatiki -> Jina Kamili la Eneo)
 @app.route('/api/tick', methods=['POST'])
 def api_tick():
     data = request.get_json() or {}
     cargo_name = (data.get('cargo_name') or '').strip().upper()
     code = (data.get('code') or '').strip().upper()
-    tick_type = (data.get('tick_type') or '').strip()  # 'received' au 'dispatched'
+    tick_type = (data.get('tick_type') or '').strip()
     place = (data.get('place') or '').strip()
+    lat = data.get('lat')
+    lng = data.get('lng')
+
+    if lat is None or lng is None:
+        return jsonify({"success": False, "message": "Lazima uwashe GPS Location ya simu yako ili mfumo usome eneo kiotomatiki!"}), 400
+
+    try:
+        lat_val = float(lat)
+        lng_val = float(lng)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "GPS haikusomwa vizuri, jaribu tena."}), 400
 
     if not place:
-        return jsonify({"success": False, "message": "Tafadhali andika jina la eneo (mf. Pangani Tanga)."}), 400
+        place = "Eneo limethibitishwa kwa GPS"
 
     cargo = get_cargo_by_name(cargo_name)
     if not cargo:
@@ -376,11 +387,11 @@ def api_tick():
     now_str = get_eat_now()
 
     if tick_type == 'received':
-        ticks['received'] = {"done": True, "time": now_str, "place": place}
+        ticks['received'] = {"done": True, "time": now_str, "place": place, "lat": lat_val, "lng": lng_val}
     elif tick_type == 'dispatched':
         if not (ticks.get('received') or {}).get('done'):
             return jsonify({"success": False, "message": "Tia tick ya 'Nimepokea Mzigo' kwanza!"}), 400
-        ticks['dispatched'] = {"done": True, "time": now_str, "place": place}
+        ticks['dispatched'] = {"done": True, "time": now_str, "place": place, "lat": lat_val, "lng": lng_val}
     else:
         return jsonify({"success": False, "message": "Aina ya tick haipo."}), 400
 
@@ -390,15 +401,17 @@ def api_tick():
     cargo_ref = shipments_ref.child(cargo["id"])
     cargo_ref.child("agents").set(agents)
 
-    # Agent 1 anapoanza kusafirisha mzigo (akitia tick ya mwanzo) ndipo initial_point inahifadhiwa
+    # Agent 1 anapoanza kusafirisha mzigo ndipo initial_point inahifadhiwa
     if step == 1 and not cargo.get("initial_point"):
         cargo_ref.child("initial_point").set({
             "place": place,
+            "lat": lat_val,
+            "lng": lng_val,
             "time": now_str,
             "agent_name": agent.get("agent_name")
         })
 
-    return jsonify({"success": True, "message": f"Tick imerekodiwa ({place})!", "time": now_str})
+    return jsonify({"success": True, "message": f"Eneo limehifadhiwa: {place}", "time": now_str})
 
 # 5. Ku-renew Code ya Agent (Owner na Agent 1 kama alisajili)
 @app.route('/api/reset-code', methods=['POST'])
